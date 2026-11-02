@@ -1,0 +1,20 @@
+# Environments and builds
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+node_modules/
+web/dist/
+*.log
+
+# Runtime data never belongs in Git: databases, profile, caches, digests, eval outputs
+data/
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+profile.json
+preferences.json
+config.toml
+eval/results/
+.env

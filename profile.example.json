@@ -1,0 +1,11 @@
+{
+  "name": "",
+  "summary": "One line on the direction you are aiming for.",
+  "facts": [
+    {"id": "P1", "text": "Employer, dates and titles, stated plainly."},
+    {"id": "P2", "text": "Areas you worked in."},
+    {"id": "P3", "text": "Tools you use."},
+    {"id": "P4", "text": "A project you built, and how (e.g. with coding-assistant help)."}
+  ],
+  "not_claimed": ["Things a reader might assume that you do not claim."]
+}

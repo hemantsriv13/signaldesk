@@ -1,0 +1,32 @@
+{
+  "library": "ph",
+  "prefix": "ph",
+  "source": "iconify",
+  "installedAt": "2026-11-02T01:00:44.945603Z",
+  "icons": [
+    "arrow-clockwise",
+    "arrow-square-out",
+    "book-open",
+    "bookmark-simple",
+    "briefcase",
+    "check-circle",
+    "circle",
+    "clock",
+    "flask",
+    "gear",
+    "info",
+    "link-simple",
+    "magnifying-glass",
+    "moon",
+    "pencil-simple",
+    "play",
+    "plus",
+    "question",
+    "robot",
+    "rss",
+    "stop",
+    "sun",
+    "warning",
+    "x"
+  ]
+}

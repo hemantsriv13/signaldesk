@@ -1,0 +1,30 @@
+# SignalDesk configuration example. Copy to <data dir>\config.toml and edit.
+# The data dir is %SIGNALDESK_HOME% if set, otherwise D:\LocalAI\signaldesk.
+# No credentials are needed: SignalDesk uses only public job APIs, public feeds and a local model.
+
+[server]
+host = "127.0.0.1"   # keep on localhost; the app has no login
+port = 8780
+
+[model]
+# An OpenAI-compatible local server (Colibri). No cloud fallback exists.
+base_url = "http://127.0.0.1:8000/v1"
+model_id = "qwen3-4b-instruct-2507-q4km"   # analysis waits if a different model is being served
+context_tokens = 2048
+max_output_tokens = 512
+prompt_char_budget = 6000                  # characters per request, instructions included: about 1,350 tokens, leaving room for 512 out
+request_timeout_seconds = 180
+max_attempts = 3
+
+[fetch]
+concurrency = 4
+timeout_seconds = 20
+per_host_interval_seconds = 1.0
+max_bytes = 40000000                    # large employers publish all postings in one response
+user_agent = "SignalDesk/0.1 (personal job and reading tracker; local use)"
+
+[limits]
+max_job_analyses_per_run = 12
+max_article_cards_per_run = 10
+max_case_studies_per_run = 2
+items_per_feed = 8
