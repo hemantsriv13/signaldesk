@@ -102,3 +102,12 @@ def test_ambiguous_salary_is_not_promoted_to_confirmed_match(salary):
 def test_clear_annual_ctc_still_compares():
     assert 'meets' in jobrules.compensation_note('CTC ₹25 lakh per annum', 'CTC', 22)
     assert 'below' in jobrules.compensation_note('CTC ₹18 lakh per annum', 'CTC', 22)
+
+
+@pytest.mark.parametrize('location,description,expected', [
+    ('Bangalore, India', '- Ability to maintain a productive collaboration between IST and US PST time zones', 'bengaluru'),
+    ('Gurugram', "You'll report to a Director of Product Management based in Europe, working with partners across India, EMEA, and North America.", 'india_other'),
+    ('Sydney, Australia', '- Operating cadences across APAC time zones (India to Japan, Korea and ANZ)', 'other'),
+])
+def test_onsite_location_field_not_overridden_by_team_description(location, description, expected):
+    assert jobrules.classify_location(location, None, description).cls == expected

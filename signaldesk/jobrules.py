@@ -47,7 +47,10 @@ def classify_location(location: str | None, workplace: str | None = None, descri
     evidence = " | ".join([both, *restrictions]).strip(" |")
     # Negated eligibility and conflicting geography require review. A keyword
     # alone is never positive evidence that a candidate can work from India.
-    relevant = [both, *restrictions]
+    # An on-site role with a stated location is placed by that field. Its
+    # description lines ("collaborate across US time zones", "report to a
+    # director based in Europe") describe the team, not where you may work.
+    relevant = [both, *restrictions] if remote or not loc else [both]
     if any(INDIA.search(line) and re.search(
             r"\b(not|no|outside|except|excluding|ineligible|cannot|can't)\b", line, re.I)
            for line in relevant):
