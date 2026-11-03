@@ -41,31 +41,38 @@ LOCATION_LABEL = {
 def classify_location(location: str | None, workplace: str | None = None, description: str | None = None) -> LocationVerdict:
     loc = (location or "").strip()
     both = f"{loc} {workplace or ''}".strip()
-    if BLR.search(loc):
-        return LocationVerdict("bengaluru", loc)
     remote = bool(REMOTE.search(both))
-    india = bool(INDIA.search(loc))
-    if remote and india:
-        return LocationVerdict("remote_india", both)
-    if india:
-        city = INDIA.search(loc).group(0).lower()
-        return LocationVerdict("india_unspecified" if city in ("india", "indian") else "india_other", loc)
-    # Look for an explicit restriction line in the description.
-    restriction = None
-    for line in (description or "").splitlines():
-        if RESTRICT_LINE.search(line) and len(line) < 400:
-            restriction = line.strip()
-            if INDIA.search(line):
-                if remote or not loc:
-                    return LocationVerdict("remote_india", restriction)
-            break
+    restrictions = [line.strip() for line in (description or "").splitlines()
+                    if len(line) < 400 and RESTRICT_LINE.search(line)]
+    evidence = " | ".join([both, *restrictions]).strip(" |")
+    # Negated eligibility and conflicting geography require review. A keyword
+    # alone is never positive evidence that a candidate can work from India.
+    relevant = [both, *restrictions]
+    if any(INDIA.search(line) and re.search(
+            r"\b(not|no|outside|except|excluding|ineligible|cannot|can't)\b", line, re.I)
+           for line in relevant):
+        return LocationVerdict("remote_unclear" if remote else "unknown", evidence)
+    india_evidence = any(INDIA.search(line) for line in relevant)
+    foreign_evidence = any(OTHER_REGION.search(line) for line in relevant)
+    if india_evidence and foreign_evidence:
+        return LocationVerdict("remote_unclear" if remote else "unknown", evidence)
+    # Do not infer remote work merely because a description mentions India.
     if remote:
-        if OTHER_REGION.search(loc) or (restriction and OTHER_REGION.search(restriction) and not INDIA.search(restriction)):
-            return LocationVerdict("remote_other", restriction if restriction and not OTHER_REGION.search(loc) else both)
-        return LocationVerdict("remote_unclear", restriction or both)
-    if not loc:
-        return LocationVerdict("unknown", "")
-    return LocationVerdict("other", loc)
+        if re.search(r"\b(not remote|no remote|on[- ]site only)\b", evidence, re.I):
+            return LocationVerdict("unknown", evidence)
+        if foreign_evidence:
+            return LocationVerdict("remote_other", evidence)
+        if india_evidence:
+            return LocationVerdict("remote_india", evidence)
+        return LocationVerdict("remote_unclear", evidence)
+    place = loc if INDIA.search(loc) else " | ".join(restrictions) if not loc else loc
+    if BLR.search(place):
+        return LocationVerdict("bengaluru", place)
+    if INDIA.search(place):
+        cities = [m.group(0).lower() for m in INDIA.finditer(place)
+                  if m.group(0).lower() not in ("india", "indian")]
+        return LocationVerdict("india_other" if cities else "india_unspecified", place)
+    return LocationVerdict("other" if loc or foreign_evidence else "unknown", evidence)
 
 
 # ---------------------------------------------------------------- salary
@@ -102,6 +109,13 @@ def inr_lakh(text: str | None) -> float | None:
     """Best-effort annual INR amount in lakh, from the first INR figure. None when not INR or unclear."""
     if not text or not re.search(r"₹|\binr\b|\brs\.?|lakh|lpa|crore", text, re.I):
         return None
+    # Ranges, multiple amounts, bounds and non-annual rates cannot safely
+    # become a single annual salary. Preserve their wording for manual review.
+    if (len(re.findall(r"\d[\d,]*(?:\.\d+)?", text)) != 1
+            or re.search(r"per\s+(month|week|day|hour)|/(month|mo|week|day|hour)\b|"
+                         r"monthly|weekly|daily|hourly|p\.?m\.?\b|up to|at least|"
+                         r"starting|from\s|minimum|maximum|\+", text, re.I)):
+        return None
     m = re.search(r"(\d+(?:\.\d+)?)\s*(lpa|lakh|l\b)", text, re.I)
     if m:
         return float(m.group(1))
@@ -117,9 +131,13 @@ def inr_lakh(text: str | None) -> float | None:
 def compensation_note(salary_text: str | None, salary_kind: str | None, threshold_lakh: float) -> str:
     if not salary_text:
         return "Not disclosed"
+    if not re.search(r"₹|\binr\b|\brs\.?|lakh|lpa|crore", salary_text, re.I):
+        return "Disclosed, not in INR lakh: compare by hand"
+    if "CTC" in (salary_kind or "") and "base" in (salary_kind or ""):
+        return f"Multiple pay components: compare by hand. {salary_text}"
     amount = inr_lakh(salary_text)
     if amount is None:
-        return "Disclosed, not in INR lakh: compare by hand"
+        return f"Disclosed, but can't be compared automatically (amount, range or pay period): {salary_text}"
     kind = salary_kind or "unspecified"
     if "CTC" in kind:
         return f"CTC about ₹{amount:g}L: {'meets' if amount >= threshold_lakh else 'below'} your ₹{threshold_lakh:g}L preference"

@@ -154,3 +154,48 @@ def test_briefing_waits_for_analyses_but_not_for_a_missing_model(engine, fake_mo
     drain(engine)
     d = json.loads(engine.db.one("SELECT content_json FROM digests ORDER BY id DESC")["content_json"])
     assert d["action"]["by"] == "rule" and any("still waiting" in n for n in d["notes"]), engine.db.all("SELECT id, kind, status, error, attempts FROM tasks")
+
+
+def test_digest_ignores_stale_rejection_after_profile_edit(engine, fake_model):
+    from signaldesk.digest import pick_jobs, job_item
+    fake_model.replies['JOB:'] = {**FIT, 'match': 'not a match'}
+    jid = add_job(engine)
+    engine.analyse('job_fit', jid)
+    drain(engine)
+    assert pick_jobs(engine, 3, set()) == []
+    profile = engine.profiles.profile()
+    profile['facts'].append({'text': 'Completed an applied AI project.'})
+    engine.profiles.save_profile(profile)
+    picked = pick_jobs(engine, 3, set())
+    assert [p['job']['id'] for p in picked] == [jid]
+    item = job_item(engine, picked[0])
+    assert item['match'] is None and item['summary'] is None
+    assert any(b['text'] == 'Analysis outdated' for b in item['badges'])
+
+
+def test_digest_recheck_refreshes_analysis_and_salary(engine, fake_model):
+    from signaldesk.digest import pick_jobs, recheck, job_item
+    fake_model.replies['JOB:'] = FIT
+    jid = add_job(engine)
+    engine.analyse('job_fit', jid)
+    drain(engine)
+    picked = pick_jobs(engine, 3, set())
+    add_job(engine, desc='Changed requirements and compensation: CTC ₹18–25 lakh')
+    recheck(engine, picked, [])
+    assert picked[0]['fit']['outdated']
+    assert '₹18–25' in picked[0]['comp'] and 'meets' not in picked[0]['comp']
+    assert job_item(engine, picked[0])['summary'] is None
+
+
+def test_outdated_positive_fit_does_not_boost_digest_ranking(engine, fake_model):
+    from signaldesk.digest import pick_jobs
+    fake_model.replies['JOB:'] = FIT
+    old = add_job(engine, ext='old')
+    engine.analyse('job_fit', old)
+    drain(engine)
+    profile = engine.profiles.profile()
+    profile['facts'].append({'text': 'New experience.'})
+    engine.profiles.save_profile(profile)
+    new = add_job(engine, ext='new')
+    engine.db.update('jobs', old, {'first_seen_at': '2026-01-01T00:00:00+00:00'})
+    assert pick_jobs(engine, 1, set())[0]['job']['id'] == new

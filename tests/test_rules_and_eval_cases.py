@@ -66,3 +66,39 @@ def test_requirements_excerpt_keeps_requirements_when_clipped():
     desc = "Intro line.\n" + ("Company history paragraph. " * 200) + "\nRequirements:\n- SQL\n- Stakeholder management"
     excerpt, cov = analysis.requirements_excerpt(desc, 600)
     assert "Requirements:" in excerpt and not cov["complete"] and cov["chars_total"] == len(desc)
+
+
+@pytest.mark.parametrize('location,workplace,description,expected', [
+    ('', None, 'Must be based in Mumbai', 'india_other'),
+    ('', None, 'Must be based in India', 'india_unspecified'),
+    ('', None, 'Must be based in Bengaluru', 'bengaluru'),
+    ('Remote', None, 'Candidates are not eligible to work in India', 'remote_unclear'),
+    ('Remote - India', None, 'Must be based in the United States', 'remote_unclear'),
+    ('Remote', None, 'Must be based in India\nMust be based in the US', 'remote_unclear'),
+    ('Remote except India', None, '', 'remote_unclear'),
+    ('India, Mumbai', None, '', 'india_other'),
+    ('Remote - India', None, '', 'remote_india'),
+    ('', 'remote', 'Must be based in India', 'remote_india'),
+    ('Remote', None, 'Must be based in the US', 'remote_other'),
+])
+def test_location_requires_positive_unambiguous_evidence(location, workplace, description, expected):
+    assert jobrules.classify_location(location, workplace, description).cls == expected
+
+
+@pytest.mark.parametrize('salary', [
+    'CTC ₹18–25 lakh per annum', 'CTC INR 18-25 LPA',
+    'CTC ₹18 lakh to ₹25 lakh', 'CTC ₹1,800,000–₹2,500,000',
+    'Base salary INR 200,000 per month', 'Base salary ₹2 lakh monthly',
+    'CTC up to ₹25 lakh', 'CTC ₹25 lakh plus ₹5 lakh bonus',
+])
+def test_ambiguous_salary_is_not_promoted_to_confirmed_match(salary):
+    kind = 'base' if salary.startswith('Base') else 'CTC'
+    note = jobrules.compensation_note(salary, kind, 22)
+    assert 'meets' not in note and 'below' not in note
+    assert salary in note
+    assert jobrules.inr_lakh(salary) is None
+
+
+def test_clear_annual_ctc_still_compares():
+    assert 'meets' in jobrules.compensation_note('CTC ₹25 lakh per annum', 'CTC', 22)
+    assert 'below' in jobrules.compensation_note('CTC ₹18 lakh per annum', 'CTC', 22)

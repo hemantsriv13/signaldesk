@@ -21,7 +21,13 @@ Requirements: Python 3.12, Node 20 or later, and (optionally) the Colibri model 
 
 ### Local model
 
-SignalDesk talks to any OpenAI-compatible server at `http://127.0.0.1:8000/v1` and expects the model `qwen3-4b-instruct-2507-q4km`. With the existing Colibri setup, start it from the **GitHub folder**, not from this repo:
+SignalDesk talks to any OpenAI-compatible server at `http://127.0.0.1:8000/v1` and expects the model `qwen3-4b-instruct-2507-q4km`. On Windows, `scripts\start.cmd` now requests startup of the existing sibling `local-ai\start-colibri.cmd` with `4b` when port 8000 is free. No models are downloaded. Keep the model window open; the app may briefly show offline while loading, then its normal health checks detect readiness.
+
+If port 8000 is occupied, the launcher does not invoke Colibri's restart script—even if the running service serves the wrong model. Custom model IDs/endpoints are also left alone. Avoid starting multiple apps' model launchers simultaneously.
+
+Use `scripts\start.cmd --no-start-model` for app-only startup. If your launcher is elsewhere, use `scripts\start.cmd --model-launcher "C:\path\to\start-colibri.cmd"`. Direct `python -m signaldesk` remains app-only unless you add `--start-model`.
+
+For manual startup, run from the **GitHub folder**, not from this repo:
 
 ```bat
 cd <your GitHub folder>

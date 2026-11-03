@@ -52,7 +52,7 @@ def pick_jobs(engine, limit: int, seen: set[str]) -> list[dict]:
         if f"job:{j['id']}:{j['content_hash'][:8]}" in seen:
             continue
         fit = engine.latest("job_fit", "job", j["id"])
-        match = fit["output"]["match"] if fit else None
+        match = fit["output"]["match"] if fit and not fit["outdated"] else None
         if match == "not a match":
             continue
         score = {"potential match": 3, "weak match": 1, "unknown": 0, None: 0}[match]
@@ -79,6 +79,9 @@ def recheck(engine, picked: list[dict], notes: list[str]) -> None:
                 notes.append(f"Could not recheck {company['name']} ({res['error']}); its jobs are shown as last verified.")
     for p in picked:
         p["job"] = engine.db.one("SELECT * FROM jobs WHERE id = ?", (p["job"]["id"],))
+        p["fit"] = engine.latest("job_fit", "job", p["job"]["id"])
+        p["comp"] = jobrules.compensation_note(
+            p["job"]["salary_text"], p["job"]["salary_kind"], prefs["ctc_threshold_lakh"])
 
 
 def job_item(engine, p: dict) -> dict:
@@ -94,6 +97,8 @@ def job_item(engine, p: dict) -> dict:
         badges.append({"tone": "neutral", "text": "Fit analysis pending"})
     elif fit["outdated"]:
         badges.append({"tone": "warning", "text": "Analysis outdated"})
+    if fit and fit["outdated"]:
+        fit = None  # Historical wording stays on the detail page, not the new digest.
     why = [j["bucket_reason"]]
     if fit and fit["output"]["evidence"]:
         why.append(f"Your background touches: {fit['output']['evidence'][0]['req']}")
@@ -165,7 +170,7 @@ def compose(engine, task: dict) -> dict:
     notes: list[str] = []
     jobs = pick_jobs(engine, int(limits.get("jobs", 3)), seen)
     recheck(engine, jobs, notes)
-    jobs = [p for p in jobs if p["job"]["listing_state"] == "open"]
+    jobs = [p for p in jobs if p["job"]["listing_state"] == "open" and p["job"]["bucket"] == "candidate"]
     job_items = [job_item(engine, p) for p in jobs]
     arts = pick_articles(engine, int(limits.get("articles", 2)), seen)
     art_items = [article_item(p) for p in arts]
