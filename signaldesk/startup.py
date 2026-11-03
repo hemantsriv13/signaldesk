@@ -22,7 +22,9 @@ def start_local_model(config: ModelConfig, launcher: Path | None = None) -> str:
             or config.model_id != ModelConfig().model_id):
         return 'Automatic start skipped: custom model settings. Start your configured model server manually.'
     try:
-        with socket.create_connection(('127.0.0.1', 8000), timeout=1):
+        # Windows retries a refused loopback connect for about 2 s before
+        # reporting it, so a shorter timeout misreads a free port as uncertain.
+        with socket.create_connection(('127.0.0.1', 8000), timeout=3):
             return 'Port 8000 is already in use; leaving the existing server untouched.'
     except ConnectionRefusedError:
         pass
