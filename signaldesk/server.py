@@ -17,6 +17,8 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from . import collect, jobrules
+from .cv import MAX_BYTES, preview_cv
+from starlette.concurrency import run_in_threadpool
 from .analysis import LABELS
 from .db import now_iso
 from .engine import AGENTS, Engine
@@ -548,6 +550,18 @@ def create_app(engine: Engine, scheduler: Scheduler | None = None) -> FastAPI:
         return {"profile": engine.profiles.profile(), "version": engine.profiles.profile_version(), "preferences": engine.profiles.prefs(),
                 "families": {k: v for k, v in jobrules.FAMILY_LABEL.items() if k not in ("ambiguous", "other")},
                 "locations": jobrules.LOCATION_LABEL}
+
+    @app.post("/api/profile/cv-preview")
+    async def cv_preview(request: Request, filename: str):
+        payload = bytearray()
+        async for chunk in request.stream():
+            if len(payload) + len(chunk) > MAX_BYTES:
+                raise HTTPException(413, "Choose a CV smaller than 5 MB.")
+            payload.extend(chunk)
+        try:
+            return await run_in_threadpool(preview_cv, filename, bytes(payload))
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from None
 
     @app.put("/api/profile")
     def put_profile(body: dict):

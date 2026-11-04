@@ -375,10 +375,19 @@ class Engine:
     def _do_job_fit(self, task: dict) -> str:
         job = self.db.one("SELECT * FROM jobs WHERE id = ?", (task["target_id"],))
         profile = self.profiles.profile()
+        # Bind both the cache and provenance to the exact CV snapshot read here,
+        # even if the user edits the profile while a queued/requested job runs.
+        profile_version = analysis.sha(profile['facts'], profile.get('not_claimed', []))[:12]
+        task['cache_key'] = analysis.cache_key('job_fit', model_id=self.cfg.model.model_id,
+            content=job['content_hash'], extra={'profile': profile_version, 'budget': self.cfg.model.prompt_char_budget})
+        self.db.update('tasks', task['id'], {'cache_key': task['cache_key']})
         prompt, cov = analysis.job_prompt(job, profile, self._budget(task))
         reply = self._call(task, "job_fit", prompt)
-        out, val = analysis.validate_job(analysis.parse_json(reply.text), job, profile)
-        inputs = {"coverage": cov, "profile_version": self.profiles.profile_version(), "tokens_in": reply.tokens_in, "tokens_out": reply.tokens_out}
+        sent_profile = {**profile, "facts": [f for f in profile["facts"] if f["id"] in cov["profile_fact_ids"]]}
+        out, val = analysis.validate_job(analysis.parse_json(reply.text), job, sent_profile)
+        if len(sent_profile['facts']) < len(profile['facts']):
+            val['notes'].append(f"Used {len(sent_profile['facts'])} of {len(profile['facts'])} profile facts, selected by keyword overlap. Other experience may have been missed; this is a partial assessment.")
+        inputs = {"coverage": cov, "profile_version": profile_version, "tokens_in": reply.tokens_in, "tokens_out": reply.tokens_out}
         self._save(task, "job_fit", "job", out, val, inputs, reply.model_served)
         return f"Analysed {cov['chars_sent']:,} of {cov['chars_total']:,} characters"
 

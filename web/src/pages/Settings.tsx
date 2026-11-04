@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react"
 import { useStatus } from "@/App"
+import { CvImport } from "@/components/cv-import"
 import { Facts, PageHeader, Section } from "@/components/common"
 import { PlusIcon, XIcon } from "@/components/icons"
 import { Button } from "@/components/ui/button"
@@ -43,12 +44,13 @@ export default function Settings() {
       {saved && <p role="status" className="text-sm text-(--success-text)">{saved}</p>}
 
       <Section title="Your profile">
+        <CvImport onUse={(facts) => setProfile({ ...profile, facts: facts.map((text, i) => ({ id: `P${i + 1}`, text })) })} />
         <p className="max-w-[75ch] text-sm text-muted-foreground">Fit analysis may only cite these facts. Keep them factual: no skill levels or years you can't support.</p>
         <ol className="flex max-w-3xl flex-col gap-2">
           {profile.facts.map((f, i) => (
             <li key={i} className="flex items-start gap-2">
               <span className="w-8 pt-2 text-sm text-muted-foreground">P{i + 1}</span>
-              <Textarea aria-label={`Fact ${i + 1}`} rows={1} className="min-h-9" value={f.text} onChange={(e) => setProfile({ ...profile, facts: profile.facts.map((x, j) => j === i ? { ...x, text: e.target.value } : x) })} />
+              <Textarea aria-label={`Fact ${i + 1}`} maxLength={400} rows={1} className="min-h-9" value={f.text} onChange={(e) => setProfile({ ...profile, facts: profile.facts.map((x, j) => j === i ? { ...x, text: e.target.value } : x) })} />
               <Button size="icon-sm" variant="ghost" aria-label={`Remove fact ${i + 1}`} onClick={() => setProfile({ ...profile, facts: profile.facts.filter((_, j) => j !== i) })}><XIcon className="size-4" /></Button>
             </li>))}
         </ol>
