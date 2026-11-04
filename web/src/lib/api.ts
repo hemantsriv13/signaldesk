@@ -135,7 +135,11 @@ export interface Analysis<T> {
   id: number
   output: T
   validation: { notes: string[] }
-  inputs: { coverage?: { chars_sent: number; chars_total: number; complete: boolean }; [k: string]: unknown }
+  inputs: {
+    coverage?: { chars_sent: number; chars_total: number; complete: boolean; profile_fact_ids?: string[]; profile_facts_total?: number }
+    facts_sent?: { id: string; text: string }[]
+    [k: string]: unknown
+  }
   model_id: string
   prompt_version: string
   created_at: string

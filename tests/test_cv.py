@@ -28,6 +28,24 @@ def test_bad_uploads_have_actionable_errors(name, payload):
         preview_cv(name, payload)
 
 
+def test_wrapped_bullets_rejoined_and_repeated_words_kept():
+    text = ('EXPERIENCE\n'
+            '• Owned the Dynamic Risk Platform roadmap, aligning cross-functional\n'
+            'stakeholders on delivery.\n'
+            '• Defined governance for 130+ enterprise risk KPIs used to monitor exposure across all of the functions\n'
+            '100+ analytics products moved to a central team.\n'
+            'Intern, Business Intelligence Jan 2022 – Aug 2022\n'
+            '• Built and ran risk and procurement dashboards.\n')
+    assert preview_cv('cv.txt', text.encode())['candidates'] == [
+        'EXPERIENCE',
+        'Owned the Dynamic Risk Platform roadmap, aligning cross-functional stakeholders on delivery.',
+        'Defined governance for 130+ enterprise risk KPIs used to monitor exposure across all of the functions '
+        '100+ analytics products moved to a central team.',
+        'Intern, Business Intelligence Jan 2022 – Aug 2022',
+        'Built and ran risk and procurement dashboards.',
+    ]
+
+
 def test_long_facts_are_not_silently_truncated():
     res = preview_cv('cv.txt', ('Work experience ' * 100).encode())
     assert res['candidates'] == []
@@ -111,3 +129,17 @@ def test_profile_change_while_queued_saves_under_actual_profile_version(engine, 
     assert not result['outdated']
     assert result['inputs']['profile_version'] == engine.profiles.profile_version()
     assert engine.db.scalar('SELECT cache_key FROM analyses WHERE id = ?', (result['id'],)) == expected
+
+
+def test_fit_keeps_text_of_facts_it_saw(engine, fake_model):
+    from test_engine import add_job, FIT
+    from conftest import drain
+    fake_model.replies['JOB:'] = FIT
+    jid = add_job(engine)
+    sent = engine.profiles.profile()['facts']
+    engine.analyse('job_fit', jid)
+    drain(engine)
+    # Renumbering the profile must not change what the stored assessment cites.
+    engine.profiles.save_profile({**engine.profiles.profile(), 'facts': [{'text': 'A completely different fact.'}] + sent})
+    snapshot = engine.latest('job_fit', 'job', jid)['inputs']['facts_sent']
+    assert snapshot and {f['id']: f['text'] for f in snapshot}.items() <= {f['id']: f['text'] for f in sent}.items()

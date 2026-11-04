@@ -115,7 +115,11 @@ function JobView({ id, statuses, onChange }: { id: number; statuses: string[]; o
   const analyse = async () => { const r = await api.send<{ result: string }>(`/api/jobs/${id}/analyse`, "POST"); setNote(r.result === "cached" ? "A saved analysis for this exact text and profile already exists." : "Queued for the local model."); reload() }
   const recheck = async () => { setNote("Checking the employer's board"); const r = await api.send<{ result: string }>(`/api/jobs/${id}/recheck`, "POST"); setNote(r.result); reload(); onChange() }
   const fit = j.fit?.output
-  const facts = Object.fromEntries(j.profile_facts.map((f) => [f.id, f.text]))
+  // Show the fact text the model actually saw. Ids are renumbered when the profile
+  // changes, so an outdated result without a snapshot can't be resolved safely.
+  const sent = j.fit?.inputs.facts_sent
+  const facts: Record<string, string> = Object.fromEntries((sent ?? (j.fit?.outdated ? [] : j.profile_facts)).map((f) => [f.id, f.text]))
+  const missingFact = sent || !j.fit?.outdated ? "Fact no longer in your profile" : "Your profile changed since this analysis; the cited fact text wasn't recorded. Re-analyse to see it."
   const waiting = j.task && ["queued", "running"].includes(j.task.status)
 
   return (
@@ -163,7 +167,7 @@ function JobView({ id, statuses, onChange }: { id: number; statuses: string[]; o
                   <ul className="flex flex-col gap-3">{fit.evidence.map((e) => (
                     <li key={e.req} className="grid gap-2 md:grid-cols-2">
                       <div><p className="font-medium">{e.req}</p><p className="text-sm text-muted-foreground">{e.note}</p></div>
-                      <ul className="flex flex-col gap-1 text-sm">{e.facts.map((f) => <li key={f} className="rounded-md bg-muted px-3 py-1.5"><span className="text-muted-foreground">{f}</span> {facts[f] ?? "Fact no longer in your profile"}</li>)}</ul>
+                      <ul className="flex flex-col gap-1 text-sm">{e.facts.map((f) => <li key={f} className="rounded-md bg-muted px-3 py-1.5"><span className="text-muted-foreground">{f}</span> {facts[f] ?? missingFact}</li>)}</ul>
                     </li>))}</ul>
                 ) : <p className="text-sm text-muted-foreground">No requirement was tied to a fact in your profile.</p>}
               </Section>

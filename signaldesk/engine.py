@@ -387,7 +387,10 @@ class Engine:
         out, val = analysis.validate_job(analysis.parse_json(reply.text), job, sent_profile)
         if len(sent_profile['facts']) < len(profile['facts']):
             val['notes'].append(f"Used {len(sent_profile['facts'])} of {len(profile['facts'])} profile facts, selected by keyword overlap. Other experience may have been missed; this is a partial assessment.")
-        inputs = {"coverage": cov, "profile_version": profile_version, "tokens_in": reply.tokens_in, "tokens_out": reply.tokens_out}
+        # Fact ids are renumbered when the profile changes, so keep the exact text
+        # each cited id had when this assessment was made.
+        inputs = {"coverage": cov, "profile_version": profile_version, "facts_sent": sent_profile["facts"],
+                  "tokens_in": reply.tokens_in, "tokens_out": reply.tokens_out}
         self._save(task, "job_fit", "job", out, val, inputs, reply.model_served)
         return f"Analysed {cov['chars_sent']:,} of {cov['chars_total']:,} characters"
 

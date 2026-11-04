@@ -10,6 +10,33 @@ MAX_TEXT = 60_000
 MAX_FACTS = 30
 
 
+BULLET = re.compile(r'^[•●▪◦‣∙·*\-–]\s+')
+
+
+def statements(text: str) -> list[str]:
+    """Split text into whole statements, rejoining lines that wrapped mid-sentence.
+
+    A line continues the previous statement when it starts in lower case (or with a
+    number after a long wrapped line) and is not itself a bullet.
+    """
+    out: list[str] = []
+    for raw in text.splitlines():
+        line = re.sub(r'\s+', ' ', raw).strip()
+        if not line:
+            continue
+        bullet = bool(BULLET.match(line))
+        line = BULLET.sub('', line).strip()
+        if not line:
+            continue
+        wrapped = (line[0].islower() or (line[0].isdigit() and out and len(out[-1]) >= 80)
+                   or line[0] in ',;:)')
+        if out and not bullet and wrapped:
+            out[-1] = f'{out[-1]} {line}'
+        else:
+            out.append(line)
+    return out
+
+
 def preview_cv(filename: str, payload: bytes) -> dict:
     if not payload or len(payload) > MAX_BYTES:
         raise ValueError('Choose a non-empty CV smaller than 5 MB.')
@@ -36,7 +63,13 @@ def preview_cv(filename: str, payload: bytes) -> dict:
                 raise ValueError('Choose a CV with at most 20 pages.')
             parts = []
             for page in reader.pages:
-                parts.append(page.extract_text() or '')
+                # Plain mode splits justified text into one word per line; layout
+                # mode keeps visual lines, which statements() then rejoins.
+                try:
+                    page_text = page.extract_text(extraction_mode='layout') or ''
+                except Exception:
+                    page_text = page.extract_text() or ''
+                parts.append('\n'.join(re.sub(r'[ \t]+', ' ', line).strip() for line in page_text.splitlines()))
                 if sum(map(len, parts)) > MAX_TEXT:
                     raise ValueError('The CV contains too much text. Upload a shorter CV.')
             text = '\n'.join(parts)
@@ -51,8 +84,7 @@ def preview_cv(filename: str, payload: bytes) -> dict:
         raise ValueError('Could not extract text from that CV. Try DOCX or TXT.') from None
     if len(text) > MAX_TEXT:
         raise ValueError('The CV contains too much text. Upload a shorter CV.')
-    lines = [re.sub(r'\s+', ' ', line).strip(' •\t') for line in text.splitlines()]
-    lines = list(dict.fromkeys(line for line in lines if line))
+    lines = list(dict.fromkeys(statements(text)))
     if not lines or sum(map(len, lines)) < 30:
         raise ValueError('No usable CV text found. Scanned PDFs need OCR first; try DOCX or paste the text.')
     # Keep whole statements; do not silently cut qualifications or negate meaning.
