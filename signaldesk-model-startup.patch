@@ -1,0 +1,214 @@
+From 8338a393fd1be5d9ae8f82a2c26c1929a1031201 Mon Sep 17 00:00:00 2001
+From: Codex <codex@openai.com>
+Date: Wed, 4 Nov 2026 00:34:38 +0530
+Subject: [PATCH] Start existing Colibri alongside Windows app when its port is
+ free
+
+---
+ README.md              |  8 +++++-
+ scripts/start.cmd      |  5 ++--
+ signaldesk/__main__.py |  7 +++++
+ signaldesk/startup.py  | 45 +++++++++++++++++++++++++++++++
+ tests/test_startup.py  | 61 ++++++++++++++++++++++++++++++++++++++++++
+ 5 files changed, 123 insertions(+), 3 deletions(-)
+ create mode 100644 signaldesk/startup.py
+ create mode 100644 tests/test_startup.py
+
+diff --git a/README.md b/README.md
+index 574bfc1..ee50fe5 100644
+--- a/README.md
++++ b/README.md
+@@ -21,7 +21,13 @@ Requirements: Python 3.12, Node 20 or later, and (optionally) the Colibri model
+ 
+ ### Local model
+ 
+-SignalDesk talks to any OpenAI-compatible server at `http://127.0.0.1:8000/v1` and expects the model `qwen3-4b-instruct-2507-q4km`. With the existing Colibri setup, start it from the **GitHub folder**, not from this repo:
++SignalDesk talks to any OpenAI-compatible server at `http://127.0.0.1:8000/v1` and expects the model `qwen3-4b-instruct-2507-q4km`. On Windows, `scripts\start.cmd` now requests startup of the existing sibling `local-ai\start-colibri.cmd` with `4b` when port 8000 is free. No models are downloaded. Keep the model window open; the app may briefly show offline while loading, then its normal health checks detect readiness.
++
++If port 8000 is occupied, the launcher does not invoke Colibri's restart script—even if the running service serves the wrong model. Custom model IDs/endpoints are also left alone. Avoid starting multiple apps' model launchers simultaneously.
++
++Use `scripts\start.cmd --no-start-model` for app-only startup. If your launcher is elsewhere, use `scripts\start.cmd --model-launcher "C:\path\to\start-colibri.cmd"`. Direct `python -m signaldesk` remains app-only unless you add `--start-model`.
++
++For manual startup, run from the **GitHub folder**, not from this repo:
+ 
+ ```bat
+ cd <your GitHub folder>
+diff --git a/scripts/start.cmd b/scripts/start.cmd
+index 5546c42..b9e906b 100644
+--- a/scripts/start.cmd
++++ b/scripts/start.cmd
+@@ -1,6 +1,7 @@
+ @echo off
+ rem Start SignalDesk on http://127.0.0.1:8780 and open it in the browser.
+-rem The local model is optional: start it separately (see README, "Local model").
++rem Starts the existing sibling local-ai Colibri launcher when port 8000 is free.
++rem Pass --no-start-model to open only SignalDesk.
+ rem Pass --home <folder> to use a different data folder than D:\LocalAI\signaldesk.
+ setlocal
+ cd /d "%~dp0.."
+@@ -8,4 +9,4 @@ if not exist .venv\Scripts\python.exe (
+   echo Run scripts\setup.cmd first.
+   exit /b 1
+ )
+-.venv\Scripts\python -m signaldesk --open %*
++.venv\Scripts\python -m signaldesk --open --start-model %*
+diff --git a/signaldesk/__main__.py b/signaldesk/__main__.py
+index 86c5bf8..e394624 100644
+--- a/signaldesk/__main__.py
++++ b/signaldesk/__main__.py
+@@ -3,6 +3,7 @@ from __future__ import annotations
+ 
+ import argparse
+ import ipaddress
++from pathlib import Path
+ import sys
+ import webbrowser
+ 
+@@ -14,6 +15,7 @@ from .engine import Engine
+ from .llm import LocalModel
+ from .netsafe import Fetcher
+ from .scheduler import Scheduler
++from .startup import start_local_model
+ from .seeds import seed
+ from .server import WEB, create_app, setup_logging
+ 
+@@ -23,6 +25,9 @@ def main(argv=None) -> int:
+     ap.add_argument("--home", help="data directory (default: %%SIGNALDESK_HOME%% or D:/LocalAI/signaldesk)")
+     ap.add_argument("--port", type=int)
+     ap.add_argument("--open", action="store_true", help="open the app in the browser")
++    ap.add_argument("--start-model", action="store_true", help="start the existing Windows Colibri 4B launcher if port 8000 is free")
++    ap.add_argument("--no-start-model", action="store_true", help="open SignalDesk without starting Colibri")
++    ap.add_argument("--model-launcher", type=Path, help="path to your existing start-colibri.cmd")
+     args = ap.parse_args(argv)
+     cfg = load_config(args.home)
+     if args.port:
+@@ -31,6 +36,8 @@ def main(argv=None) -> int:
+     if host != "localhost" and not ipaddress.ip_address(host).is_loopback:
+         print(f"Refusing to listen on {host}: SignalDesk has no login and must stay on this computer (use 127.0.0.1).")
+         return 2
++    if args.start_model and not args.no_start_model:
++        print(start_local_model(cfg.model, args.model_launcher), flush=True)
+     setup_logging(cfg.logs_dir)
+     db = DB(cfg.db_path)
+     seed(db)
+diff --git a/signaldesk/startup.py b/signaldesk/startup.py
+new file mode 100644
+index 0000000..525dbee
+--- /dev/null
++++ b/signaldesk/startup.py
+@@ -0,0 +1,45 @@
++"""Optional Windows launcher for the existing, shared Colibri installation."""
++from pathlib import Path
++import socket
++import subprocess
++import sys
++from urllib.parse import urlsplit
++
++from .config import ModelConfig
++
++
++def start_local_model(config: ModelConfig, launcher: Path | None = None) -> str:
++    """Launch only the known default 4B setup, never replace a listening server.
++
++    Colibri's existing script can stop a running model. Do not invoke it when
++    the port is occupied, even if that service is unhealthy or serves another
++    model. SignalDesk's normal health checks report readiness afterwards.
++    """
++    endpoint = urlsplit(config.base_url)
++    if (endpoint.scheme != 'http' or endpoint.hostname != '127.0.0.1'
++            or endpoint.port != 8000 or endpoint.path.rstrip('/') != '/v1'
++            or endpoint.username or endpoint.password or endpoint.query or endpoint.fragment
++            or config.model_id != ModelConfig().model_id):
++        return 'Automatic start skipped: custom model settings. Start your configured model server manually.'
++    try:
++        with socket.create_connection(('127.0.0.1', 8000), timeout=1):
++            return 'Port 8000 is already in use; leaving the existing server untouched.'
++    except ConnectionRefusedError:
++        pass
++    except OSError as exc:
++        return f'Automatic start skipped: could not safely check port 8000 ({exc}).'
++    if sys.platform != 'win32':
++        return 'Automatic Colibri start is supported on Windows. Start the model server manually.'
++    launcher = (launcher or Path(__file__).resolve().parents[2] / 'local-ai' / 'start-colibri.cmd').resolve()
++    if not launcher.is_file():
++        return f'Colibri launcher not found: {launcher}. Start it manually or pass --model-launcher PATH.'
++    # PowerShell literal quoting handles spaces and apostrophes without treating
++    # the path as executable PowerShell text. Keep Colibri in its own console.
++    command = "& '" + str(launcher).replace("'", "''") + "' '4b'"
++    try:
++        subprocess.Popen(['powershell.exe', '-NoProfile', '-Command', command],
++                         cwd=str(launcher.parent), creationflags=subprocess.CREATE_NEW_CONSOLE)
++    except OSError as exc:
++        return f'Could not start Colibri: {exc}. SignalDesk will still open.'
++    return ('Colibri start requested in a separate window. The model may show offline while it loads; '
++            'SignalDesk will detect it automatically. If it stays offline, check that window for errors.')
+diff --git a/tests/test_startup.py b/tests/test_startup.py
+new file mode 100644
+index 0000000..99783dd
+--- /dev/null
++++ b/tests/test_startup.py
+@@ -0,0 +1,61 @@
++from unittest.mock import MagicMock
++
++import pytest
++from signaldesk.config import ModelConfig
++from signaldesk.startup import start_local_model
++
++
++@pytest.fixture
++def launch_env(monkeypatch, tmp_path):
++    from signaldesk import startup
++    launcher = tmp_path / "folder with spaces" / "start-colibri.cmd"
++    launcher.parent.mkdir()
++    launcher.write_text('@echo off')
++    connect, popen = MagicMock(side_effect=ConnectionRefusedError), MagicMock()
++    monkeypatch.setattr(startup.socket, 'create_connection', connect)
++    monkeypatch.setattr(startup.subprocess, 'Popen', popen)
++    monkeypatch.setattr(startup.subprocess, 'CREATE_NEW_CONSOLE', 16, raising=False)
++    monkeypatch.setattr(startup.sys, 'platform', 'win32')
++    return launcher, connect, popen
++
++
++def test_launches_existing_4b_script(launch_env):
++    launcher, _, popen = launch_env
++    assert 'start requested' in start_local_model(ModelConfig(), launcher)
++    assert popen.call_args.args[0][-1] == f"& '{launcher}' '4b'"
++    assert popen.call_args.kwargs['cwd'] == str(launcher.parent)
++
++
++def test_existing_listener_never_restarted(launch_env):
++    launcher, connect, popen = launch_env
++    connect.side_effect = None
++    assert 'untouched' in start_local_model(ModelConfig(), launcher)
++    popen.assert_not_called()
++
++
++@pytest.mark.parametrize('config', [ModelConfig(model_id='other'), ModelConfig(base_url='http://example.com:8000/v1')])
++def test_custom_model_never_replaced(launch_env, config):
++    launcher, connect, popen = launch_env
++    assert 'custom model' in start_local_model(config, launcher)
++    connect.assert_not_called()
++    popen.assert_not_called()
++
++
++def test_missing_launcher_does_not_prevent_app_start(launch_env):
++    launcher, _, popen = launch_env
++    launcher.unlink()
++    assert 'not found' in start_local_model(ModelConfig(), launcher)
++    popen.assert_not_called()
++
++
++def test_launch_failure_is_explained(launch_env):
++    launcher, _, popen = launch_env
++    popen.side_effect = OSError('PowerShell unavailable')
++    assert 'will still open' in start_local_model(ModelConfig(), launcher)
++
++
++def test_uncertain_port_check_does_not_launch(launch_env):
++    launcher, connect, popen = launch_env
++    connect.side_effect = TimeoutError()
++    assert 'could not safely check' in start_local_model(ModelConfig(), launcher)
++    popen.assert_not_called()
+-- 
+2.51.1
+

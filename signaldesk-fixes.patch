@@ -1,0 +1,249 @@
+From 007b6ff619605ba6dfc75dec6cc382391583321e Mon Sep 17 00:00:00 2001
+From: Codex <codex@openai.com>
+Date: Wed, 4 Nov 2026 00:29:15 +0530
+Subject: [PATCH] Fix job eligibility, salary comparisons and stale digest
+ decisions
+
+---
+ signaldesk/digest.py               |  9 +++-
+ signaldesk/jobrules.py             | 66 +++++++++++++++++++-----------
+ tests/test_engine.py               | 45 ++++++++++++++++++++
+ tests/test_rules_and_eval_cases.py | 36 ++++++++++++++++
+ 4 files changed, 130 insertions(+), 26 deletions(-)
+
+diff --git a/signaldesk/digest.py b/signaldesk/digest.py
+index 2450080..e05dd22 100644
+--- a/signaldesk/digest.py
++++ b/signaldesk/digest.py
+@@ -52,7 +52,7 @@ def pick_jobs(engine, limit: int, seen: set[str]) -> list[dict]:
+         if f"job:{j['id']}:{j['content_hash'][:8]}" in seen:
+             continue
+         fit = engine.latest("job_fit", "job", j["id"])
+-        match = fit["output"]["match"] if fit else None
++        match = fit["output"]["match"] if fit and not fit["outdated"] else None
+         if match == "not a match":
+             continue
+         score = {"potential match": 3, "weak match": 1, "unknown": 0, None: 0}[match]
+@@ -79,6 +79,9 @@ def recheck(engine, picked: list[dict], notes: list[str]) -> None:
+                 notes.append(f"Could not recheck {company['name']} ({res['error']}); its jobs are shown as last verified.")
+     for p in picked:
+         p["job"] = engine.db.one("SELECT * FROM jobs WHERE id = ?", (p["job"]["id"],))
++        p["fit"] = engine.latest("job_fit", "job", p["job"]["id"])
++        p["comp"] = jobrules.compensation_note(
++            p["job"]["salary_text"], p["job"]["salary_kind"], prefs["ctc_threshold_lakh"])
+ 
+ 
+ def job_item(engine, p: dict) -> dict:
+@@ -94,6 +97,8 @@ def job_item(engine, p: dict) -> dict:
+         badges.append({"tone": "neutral", "text": "Fit analysis pending"})
+     elif fit["outdated"]:
+         badges.append({"tone": "warning", "text": "Analysis outdated"})
++    if fit and fit["outdated"]:
++        fit = None  # Historical wording stays on the detail page, not the new digest.
+     why = [j["bucket_reason"]]
+     if fit and fit["output"]["evidence"]:
+         why.append(f"Your background touches: {fit['output']['evidence'][0]['req']}")
+@@ -165,7 +170,7 @@ def compose(engine, task: dict) -> dict:
+     notes: list[str] = []
+     jobs = pick_jobs(engine, int(limits.get("jobs", 3)), seen)
+     recheck(engine, jobs, notes)
+-    jobs = [p for p in jobs if p["job"]["listing_state"] == "open"]
++    jobs = [p for p in jobs if p["job"]["listing_state"] == "open" and p["job"]["bucket"] == "candidate"]
+     job_items = [job_item(engine, p) for p in jobs]
+     arts = pick_articles(engine, int(limits.get("articles", 2)), seen)
+     art_items = [article_item(p) for p in arts]
+diff --git a/signaldesk/jobrules.py b/signaldesk/jobrules.py
+index 3a34042..cdc6dbd 100644
+--- a/signaldesk/jobrules.py
++++ b/signaldesk/jobrules.py
+@@ -41,31 +41,38 @@ LOCATION_LABEL = {
+ def classify_location(location: str | None, workplace: str | None = None, description: str | None = None) -> LocationVerdict:
+     loc = (location or "").strip()
+     both = f"{loc} {workplace or ''}".strip()
+-    if BLR.search(loc):
+-        return LocationVerdict("bengaluru", loc)
+     remote = bool(REMOTE.search(both))
+-    india = bool(INDIA.search(loc))
+-    if remote and india:
+-        return LocationVerdict("remote_india", both)
+-    if india:
+-        city = INDIA.search(loc).group(0).lower()
+-        return LocationVerdict("india_unspecified" if city in ("india", "indian") else "india_other", loc)
+-    # Look for an explicit restriction line in the description.
+-    restriction = None
+-    for line in (description or "").splitlines():
+-        if RESTRICT_LINE.search(line) and len(line) < 400:
+-            restriction = line.strip()
+-            if INDIA.search(line):
+-                if remote or not loc:
+-                    return LocationVerdict("remote_india", restriction)
+-            break
++    restrictions = [line.strip() for line in (description or "").splitlines()
++                    if len(line) < 400 and RESTRICT_LINE.search(line)]
++    evidence = " | ".join([both, *restrictions]).strip(" |")
++    # Negated eligibility and conflicting geography require review. A keyword
++    # alone is never positive evidence that a candidate can work from India.
++    relevant = [both, *restrictions]
++    if any(INDIA.search(line) and re.search(
++            r"\b(not|no|outside|except|excluding|ineligible|cannot|can't)\b", line, re.I)
++           for line in relevant):
++        return LocationVerdict("remote_unclear" if remote else "unknown", evidence)
++    india_evidence = any(INDIA.search(line) for line in relevant)
++    foreign_evidence = any(OTHER_REGION.search(line) for line in relevant)
++    if india_evidence and foreign_evidence:
++        return LocationVerdict("remote_unclear" if remote else "unknown", evidence)
++    # Do not infer remote work merely because a description mentions India.
+     if remote:
+-        if OTHER_REGION.search(loc) or (restriction and OTHER_REGION.search(restriction) and not INDIA.search(restriction)):
+-            return LocationVerdict("remote_other", restriction if restriction and not OTHER_REGION.search(loc) else both)
+-        return LocationVerdict("remote_unclear", restriction or both)
+-    if not loc:
+-        return LocationVerdict("unknown", "")
+-    return LocationVerdict("other", loc)
++        if re.search(r"\b(not remote|no remote|on[- ]site only)\b", evidence, re.I):
++            return LocationVerdict("unknown", evidence)
++        if foreign_evidence:
++            return LocationVerdict("remote_other", evidence)
++        if india_evidence:
++            return LocationVerdict("remote_india", evidence)
++        return LocationVerdict("remote_unclear", evidence)
++    place = loc if INDIA.search(loc) else " | ".join(restrictions) if not loc else loc
++    if BLR.search(place):
++        return LocationVerdict("bengaluru", place)
++    if INDIA.search(place):
++        cities = [m.group(0).lower() for m in INDIA.finditer(place)
++                  if m.group(0).lower() not in ("india", "indian")]
++        return LocationVerdict("india_other" if cities else "india_unspecified", place)
++    return LocationVerdict("other" if loc or foreign_evidence else "unknown", evidence)
+ 
+ 
+ # ---------------------------------------------------------------- salary
+@@ -102,6 +109,13 @@ def inr_lakh(text: str | None) -> float | None:
+     """Best-effort annual INR amount in lakh, from the first INR figure. None when not INR or unclear."""
+     if not text or not re.search(r"₹|\binr\b|\brs\.?|lakh|lpa|crore", text, re.I):
+         return None
++    # Ranges, multiple amounts, bounds and non-annual rates cannot safely
++    # become a single annual salary. Preserve their wording for manual review.
++    if (len(re.findall(r"\d[\d,]*(?:\.\d+)?", text)) != 1
++            or re.search(r"per\s+(month|week|day|hour)|/(month|mo|week|day|hour)\b|"
++                         r"monthly|weekly|daily|hourly|p\.?m\.?\b|up to|at least|"
++                         r"starting|from\s|minimum|maximum|\+", text, re.I)):
++        return None
+     m = re.search(r"(\d+(?:\.\d+)?)\s*(lpa|lakh|l\b)", text, re.I)
+     if m:
+         return float(m.group(1))
+@@ -117,9 +131,13 @@ def inr_lakh(text: str | None) -> float | None:
+ def compensation_note(salary_text: str | None, salary_kind: str | None, threshold_lakh: float) -> str:
+     if not salary_text:
+         return "Not disclosed"
++    if not re.search(r"₹|\binr\b|\brs\.?|lakh|lpa|crore", salary_text, re.I):
++        return "Disclosed, not in INR lakh: compare by hand"
++    if "CTC" in (salary_kind or "") and "base" in (salary_kind or ""):
++        return f"Multiple pay components: compare by hand. {salary_text}"
+     amount = inr_lakh(salary_text)
+     if amount is None:
+-        return "Disclosed, not in INR lakh: compare by hand"
++        return f"Disclosed, but can't be compared automatically (amount, range or pay period): {salary_text}"
+     kind = salary_kind or "unspecified"
+     if "CTC" in kind:
+         return f"CTC about ₹{amount:g}L: {'meets' if amount >= threshold_lakh else 'below'} your ₹{threshold_lakh:g}L preference"
+diff --git a/tests/test_engine.py b/tests/test_engine.py
+index 914f738..ba4e8df 100644
+--- a/tests/test_engine.py
++++ b/tests/test_engine.py
+@@ -154,3 +154,48 @@ def test_briefing_waits_for_analyses_but_not_for_a_missing_model(engine, fake_mo
+     drain(engine)
+     d = json.loads(engine.db.one("SELECT content_json FROM digests ORDER BY id DESC")["content_json"])
+     assert d["action"]["by"] == "rule" and any("still waiting" in n for n in d["notes"]), engine.db.all("SELECT id, kind, status, error, attempts FROM tasks")
++
++
++def test_digest_ignores_stale_rejection_after_profile_edit(engine, fake_model):
++    from signaldesk.digest import pick_jobs, job_item
++    fake_model.replies['JOB:'] = {**FIT, 'match': 'not a match'}
++    jid = add_job(engine)
++    engine.analyse('job_fit', jid)
++    drain(engine)
++    assert pick_jobs(engine, 3, set()) == []
++    profile = engine.profiles.profile()
++    profile['facts'].append({'text': 'Completed an applied AI project.'})
++    engine.profiles.save_profile(profile)
++    picked = pick_jobs(engine, 3, set())
++    assert [p['job']['id'] for p in picked] == [jid]
++    item = job_item(engine, picked[0])
++    assert item['match'] is None and item['summary'] is None
++    assert any(b['text'] == 'Analysis outdated' for b in item['badges'])
++
++
++def test_digest_recheck_refreshes_analysis_and_salary(engine, fake_model):
++    from signaldesk.digest import pick_jobs, recheck, job_item
++    fake_model.replies['JOB:'] = FIT
++    jid = add_job(engine)
++    engine.analyse('job_fit', jid)
++    drain(engine)
++    picked = pick_jobs(engine, 3, set())
++    add_job(engine, desc='Changed requirements and compensation: CTC ₹18–25 lakh')
++    recheck(engine, picked, [])
++    assert picked[0]['fit']['outdated']
++    assert '₹18–25' in picked[0]['comp'] and 'meets' not in picked[0]['comp']
++    assert job_item(engine, picked[0])['summary'] is None
++
++
++def test_outdated_positive_fit_does_not_boost_digest_ranking(engine, fake_model):
++    from signaldesk.digest import pick_jobs
++    fake_model.replies['JOB:'] = FIT
++    old = add_job(engine, ext='old')
++    engine.analyse('job_fit', old)
++    drain(engine)
++    profile = engine.profiles.profile()
++    profile['facts'].append({'text': 'New experience.'})
++    engine.profiles.save_profile(profile)
++    new = add_job(engine, ext='new')
++    engine.db.update('jobs', old, {'first_seen_at': '2026-01-01T00:00:00+00:00'})
++    assert pick_jobs(engine, 1, set())[0]['job']['id'] == new
+diff --git a/tests/test_rules_and_eval_cases.py b/tests/test_rules_and_eval_cases.py
+index 2885fcf..bdd84e1 100644
+--- a/tests/test_rules_and_eval_cases.py
++++ b/tests/test_rules_and_eval_cases.py
+@@ -66,3 +66,39 @@ def test_requirements_excerpt_keeps_requirements_when_clipped():
+     desc = "Intro line.\n" + ("Company history paragraph. " * 200) + "\nRequirements:\n- SQL\n- Stakeholder management"
+     excerpt, cov = analysis.requirements_excerpt(desc, 600)
+     assert "Requirements:" in excerpt and not cov["complete"] and cov["chars_total"] == len(desc)
++
++
++@pytest.mark.parametrize('location,workplace,description,expected', [
++    ('', None, 'Must be based in Mumbai', 'india_other'),
++    ('', None, 'Must be based in India', 'india_unspecified'),
++    ('', None, 'Must be based in Bengaluru', 'bengaluru'),
++    ('Remote', None, 'Candidates are not eligible to work in India', 'remote_unclear'),
++    ('Remote - India', None, 'Must be based in the United States', 'remote_unclear'),
++    ('Remote', None, 'Must be based in India\nMust be based in the US', 'remote_unclear'),
++    ('Remote except India', None, '', 'remote_unclear'),
++    ('India, Mumbai', None, '', 'india_other'),
++    ('Remote - India', None, '', 'remote_india'),
++    ('', 'remote', 'Must be based in India', 'remote_india'),
++    ('Remote', None, 'Must be based in the US', 'remote_other'),
++])
++def test_location_requires_positive_unambiguous_evidence(location, workplace, description, expected):
++    assert jobrules.classify_location(location, workplace, description).cls == expected
++
++
++@pytest.mark.parametrize('salary', [
++    'CTC ₹18–25 lakh per annum', 'CTC INR 18-25 LPA',
++    'CTC ₹18 lakh to ₹25 lakh', 'CTC ₹1,800,000–₹2,500,000',
++    'Base salary INR 200,000 per month', 'Base salary ₹2 lakh monthly',
++    'CTC up to ₹25 lakh', 'CTC ₹25 lakh plus ₹5 lakh bonus',
++])
++def test_ambiguous_salary_is_not_promoted_to_confirmed_match(salary):
++    kind = 'base' if salary.startswith('Base') else 'CTC'
++    note = jobrules.compensation_note(salary, kind, 22)
++    assert 'meets' not in note and 'below' not in note
++    assert salary in note
++    assert jobrules.inr_lakh(salary) is None
++
++
++def test_clear_annual_ctc_still_compares():
++    assert 'meets' in jobrules.compensation_note('CTC ₹25 lakh per annum', 'CTC', 22)
++    assert 'below' in jobrules.compensation_note('CTC ₹18 lakh per annum', 'CTC', 22)
+-- 
+2.51.1
+
