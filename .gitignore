@@ -18,3 +18,10 @@ preferences.json
 config.toml
 eval/results/
 .env
+*.local
+web/android/.gradle/
+web/android/**/build/
+*.keystore
+*.jks
+web/dist-mobile/
+delivery.env

@@ -40,7 +40,7 @@ export const useStatus = () => useContext(Ctx)
 
 function useTheme() {
   const read = () => { try { return localStorage.getItem("theme") } catch { return null } }
-  const [theme, setTheme] = useState<string | null>(read)
+  const [theme, setTheme] = useState<string | null>(() => read() ?? "light")
   useEffect(() => {
     const media = window.matchMedia("(prefers-color-scheme: dark)")
     const apply = () => document.documentElement.classList.toggle("dark", theme ? theme === "dark" : media.matches)
@@ -72,7 +72,7 @@ export default function App() {
         <a href="#main" className="sr-only focus:not-sr-only focus:absolute focus:left-2 focus:top-2 focus:z-50 focus:rounded focus:bg-background focus:p-2">Skip to content</a>
         <Sidebar className="h-auto w-full shrink-0 border-e-0 border-b lg:h-dvh lg:w-56 lg:border-e lg:border-b-0">
           <SidebarHeader className="flex flex-row items-center justify-between gap-2 px-4 py-3">
-            <span className="font-heading text-lg font-medium">SignalDesk</span>
+            <span className="flex items-center gap-2 font-heading text-xl font-medium"><span aria-hidden="true" className="brand-mark">s</span>SignalDesk</span>
             <Button variant="ghost" size="icon-sm" onClick={toggleTheme} aria-label="Switch between light and dark theme">
               <MoonIcon className="size-4 dark:hidden" /><SunIcon className="hidden size-4 dark:block" />
             </Button>

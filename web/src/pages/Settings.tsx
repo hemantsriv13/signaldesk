@@ -1,3 +1,4 @@
+import { DeliverySettings } from "@/components/delivery-settings"
 import { useEffect, useState } from "react"
 import { useStatus } from "@/App"
 import { CvImport } from "@/components/cv-import"
@@ -43,6 +44,7 @@ export default function Settings() {
       <PageHeader title="Profile and settings" line={<>Stored on this computer in {settings?.dataDir ?? "the data folder"}, never in the code repository.</>} />
       {saved && <p role="status" className="text-sm text-(--success-text)">{saved}</p>}
 
+      <DeliverySettings />
       <Section title="Your profile">
         <CvImport onUse={(facts) => setProfile({ ...profile, facts: facts.map((text, i) => ({ id: `P${i + 1}`, text })) })} />
         <p className="max-w-[75ch] text-sm text-muted-foreground">Fit analysis may only cite these facts. Keep them factual: no skill levels or years you can't support.</p>
@@ -105,7 +107,7 @@ export default function Settings() {
             ["Context window", `${settings.model.context_tokens} tokens (a token is about 4 characters), up to ${settings.model.max_output_tokens} for the reply`],
             ["Text per request", `about ${settings.model.prompt_char_budget} characters`],
             ["Attempts per item", String(settings.model.max_attempts)],
-            ["Paid APIs", "None configured. There is no cloud fallback."],
+            ["Paid AI APIs", "None. Cloud sync and WhatsApp are separate optional services."],
           ]} />
           <p className="max-w-[75ch] text-sm text-muted-foreground">Change these in {settings.configFile} and restart SignalDesk. To try the installed 9B model, see "Comparing models" in the README: it runs separately and does not switch this app's model.</p>
         </Section>

@@ -61,6 +61,10 @@ export default function Today() {
   const digest = status?.latestDigest
   return (
     <div className="flex flex-col gap-8 p-4 sm:p-6">
+      <div className="welcome-card rounded-2xl px-5 py-4">
+        <p className="font-heading text-xl">Less noise. More possibility.</p>
+        <p className="mt-1 text-sm">Today's jobs, useful reads and real AI work.</p>
+      </div>
       <PageHeader title="Today" line="Your latest briefing and what the agents are doing."
         action={<Button onClick={() => runAll()} disabled={running || !status}><PlayIcon className="size-4" />{running ? "Running" : "Run now"}</Button>} />
       {message && <p role="status" className="text-sm text-(--warning-text)">{message}</p>}

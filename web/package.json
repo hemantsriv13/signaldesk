@@ -7,10 +7,16 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "oxlint",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "build:mobile": "tsc -b && vite build --mode mobile --outDir dist-mobile",
+    "android:sync": "npm run build:mobile && cap sync android",
+    "android:open": "cap open android"
   },
   "dependencies": {
     "@base-ui/react": "^1.9.0",
+    "@capacitor/android": "^8.6.0",
+    "@capacitor/app": "^8.1.2",
+    "@capacitor/core": "^8.6.0",
     "@dnd-kit/core": "^6.3.1",
     "@dnd-kit/sortable": "^10.0.0",
     "@dnd-kit/utilities": "^3.2.2",
@@ -20,6 +26,7 @@
     "@iconify/react": "^6.0.4",
     "@number-flow/react": "^0.6.2",
     "@radix-ui/react-slot": "^1.5.0",
+    "@supabase/supabase-js": "^2.119.0",
     "@tailwindcss/vite": "^4.3.3",
     "@visx/brush": "^4.0.0",
     "@visx/curve": "^4.0.0",
@@ -61,6 +68,7 @@
     "vaul": "^1.1.2"
   },
   "devDependencies": {
+    "@capacitor/cli": "^8.6.0",
     "@types/d3-array": "^3.2.2",
     "@types/d3-geo": "^3.1.1",
     "@types/d3-sankey": "^0.12.5",

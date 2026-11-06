@@ -20,6 +20,8 @@ from . import collect, jobrules
 from .cv import MAX_BYTES, preview_cv
 from starlette.concurrency import run_in_threadpool
 from .analysis import LABELS
+from .discovery import discover
+from .delivery import Delivery
 from .db import now_iso
 from .engine import AGENTS, Engine
 from .netsafe import FetchError
@@ -111,6 +113,8 @@ def create_app(engine: Engine, scheduler: Scheduler | None = None) -> FastAPI:
     app = FastAPI(title="SignalDesk", docs_url=None, redoc_url=None, openapi_url=None)
     db = engine.db
     scheduler = scheduler or Scheduler(engine)
+    delivery = Delivery(engine)
+    app.state.delivery = delivery
 
     @app.middleware("http")
     async def guard(request: Request, call_next):
@@ -487,6 +491,31 @@ def create_app(engine: Engine, scheduler: Scheduler | None = None) -> FastAPI:
             raise HTTPException(400, "Enter the board id from the job board address, e.g. 'stripe' in boards.greenhouse.io/stripe")
         if not re.match(r"https?://", body.careers_url):
             raise HTTPException(400, "The careers URL must start with https://")
+
+    @app.post("/api/sources/discover")
+    def discover_source(body: UrlBody):
+        try:
+            return discover(engine.fetcher, body.url)
+        except (FetchError, ValueError) as exc:
+            raise HTTPException(400, str(exc)) from None
+
+    @app.get("/api/delivery")
+    def delivery_status():
+        return delivery.describe()
+
+    @app.post("/api/delivery/retry/{digest_id}")
+    def retry_delivery(digest_id: int):
+        try:
+            delivery.retry_rejected(digest_id)
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from None
+        return delivery.describe()
+
+    @app.post("/api/delivery/sync")
+    def sync_now():
+        # A configured automatic WhatsApp sender may submit new, unsent digests.
+        delivery.tick()
+        return delivery.describe()
 
     @app.get("/api/sources")
     def sources():

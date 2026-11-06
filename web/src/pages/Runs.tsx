@@ -66,7 +66,7 @@ function UsageSummary() {
       <p className="flex flex-wrap gap-x-6 gap-y-1 text-muted-foreground">
         <span>{w.fetched} items fetched</span><span>{w.analysed} analysed</span><span>{w.cacheHits} cache hits</span>
         <span>{w.modelRequests} model requests ({w.failedRequests} failed)</span><span>Tokens: {tokens}</span>
-        <span>{w.modelSeconds} s of model time</span><span>{w.retries} retries, {w.errors} errors</span><span>Paid APIs: disabled</span>
+        <span>{w.modelSeconds} s of model time</span><span>{w.retries} retries, {w.errors} errors</span><span>Paid AI APIs: none; optional cloud and messaging costs are separate</span>
       </p>
       <p className="text-xs text-muted-foreground">{data.note}{w.requestsWithoutTokenCounts ? ` ${w.requestsWithoutTokenCounts} requests had no token counts from the server.` : ""}</p>
     </section>

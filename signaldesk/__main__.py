@@ -45,6 +45,7 @@ def main(argv=None) -> int:
     scheduler = Scheduler(engine)
     scheduler.thread.start()
     app = create_app(engine, scheduler)
+    app.state.delivery.thread.start()
     url = f"http://{host}:{cfg.server.port}/"
     print(f"SignalDesk data: {cfg.home}")
     print(f"Model server: {cfg.model.base_url} (expects {cfg.model.model_id}); {engine.check_model()['message']}")
