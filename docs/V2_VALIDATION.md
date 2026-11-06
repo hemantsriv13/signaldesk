@@ -43,3 +43,12 @@ must not be reported as proof of live WhatsApp delivery or real-model accuracy.
 WhatsApp delivery, the hosted reader and App Links were removed at the owner's request.
 Earlier lines that mention them describe the kit as received. Briefing summaries now appear
 in a Summaries tab in the phone reader.
+
+## Live checks, 2026-11-06
+
+- `scripts/verify_cloud.py` passed on the live Supabase project: signed-out and second-account
+  reads returned nothing, and edit, delete and insert attempts from the app logins were refused.
+- Owner-reported on a real Android phone: login, Summaries, opening a briefing, source links and
+  Back, reading with the laptop shut down on mobile data, Airplane mode reading, and sign-out clearing.
+- The APK's contents were scanned: the project URL and public key are present, the secret key is not.
+- Not tested: a newly generated briefing reaching the phone, font scaling and keyboard use on the phone.

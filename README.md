@@ -227,6 +227,14 @@ Only items tested on the real app are listed as working. Last updated 2026-11-06
 | Desktop interface (Today, Sources, Settings) | Working | Opened in a browser with real data at desktop and 390px widths |
 | Careers-page discovery | Working for Greenhouse, Lever and Ashby links in the page's HTML | Real sites. Pages that load jobs with JavaScript find nothing and need manual entry |
 | Colibri CV matching | Working | Real job analysed by the local model; result cited profile facts |
-| Phone reader screens, including Summaries | Tested against a local stand-in only | Layout, login errors, tabs and links. Not proof of the real cloud |
 | Private cloud sync (Supabase) | Working | Real briefings uploaded; `scripts/verify_cloud.py` passed on the live project with two accounts |
-| Android APK from this code | Built, not yet tested on a phone | Build and signature checked; secret key absent from the file |
+| Android app: login, briefings, Summaries, source links | Working | Installed on a real phone |
+| Reading with the laptop off | Working | Laptop shut down, phone on mobile data |
+| Reading with no internet | Working | Airplane mode, with a saved login session |
+| Sign-out clears the phone's copies | Working | Checked in Airplane mode after signing out |
+| A new briefing reaching the phone | Not tested end to end | Only existing briefings have been synced so far |
+| Automatic updates to the app | Not set up | The app has a test signature. A permanent signature needs a reinstall once |
+
+Limits: new briefings need the laptop and Colibri running. Start with
+`powershell -File scripts\start-v2.ps1`, because `scripts\start.cmd` does not load the cloud
+settings. Supabase's free plan can pause a project after about a week of low activity.
