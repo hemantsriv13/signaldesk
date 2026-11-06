@@ -1,7 +1,6 @@
-"""Optional outbound cloud snapshots and WhatsApp template submissions.
+"""Optional outbound cloud snapshots for the private phone reader.
 
 No inbound access to the laptop. Credentials come from environment variables.
-HTTP acceptance is not a delivery receipt. Ambiguous sends are not auto-retried.
 """
 import hashlib
 import json
@@ -26,26 +25,17 @@ def public_snapshot(content):
             'notes': content.get('notes', []), 'quiet': content.get('quiet', False)}
 
 
-def summary_text(content):
-    lines = ['Your SignalDesk briefing']
-    for key, label in (('jobs', 'Jobs'), ('articles', 'Reading')):
-        items = content.get(key, [])
-        if items:
-            lines.append(label + ': ' + '; '.join(str(i['title'])[:100] for i in items[:3]))
-    if content.get('case'):
-        lines.append('AI in practice: ' + str(content['case']['title'])[:100])
-    if len(lines) == 1:
-        lines.append('A quiet day. Open the app to review saved results.')
-    # Meta rejects template variables containing newlines, tabs or runs of 5+ spaces.
-    return re.sub(r'\s+', ' ', ' | '.join(lines)).strip()[:900]
-
-
 def valid_https(url):
     try:
         p = urlsplit(url)
         return p.scheme == 'https' and bool(p.hostname) and not p.username and not p.password
     except ValueError:
         return False
+
+
+def auth_headers(key):
+    # Supabase's newer sb_secret_ keys are not JWTs, so they go only in the apikey header.
+    return {'apikey': key} if key.startswith('sb_') else {'apikey': key, 'Authorization': 'Bearer ' + key}
 
 
 class Delivery:
@@ -58,25 +48,12 @@ class Delivery:
         self.thread = threading.Thread(target=self._loop, daemon=True, name='signaldesk-sync')
         if not self.db.get_setting('sync_instance'):
             self.db.set_setting('sync_instance', str(uuid.uuid4()))
-        enabled = self.env.get('SIGNALDESK_WHATSAPP_ENABLED') == 'true'
-        newly_enabled = enabled and not self.db.get_setting('delivery_whatsapp_enabled')
-        self.db.set_setting('delivery_whatsapp_enabled', enabled)
-        if newly_enabled or self.db.get_setting('delivery_activation') is None:
-            self.db.set_setting('delivery_activation', {'id': self.db.scalar('SELECT MAX(id) FROM digests') or 0})
 
     def config(self):
         e = self.env
         cloud = bool(valid_https(e.get('SIGNALDESK_SUPABASE_URL', '')) and e.get('SIGNALDESK_SUPABASE_SERVICE_KEY') and
                      re.fullmatch(r'[0-9a-fA-F-]{36}', e.get('SIGNALDESK_OWNER_ID', '')))
-        whatsapp = bool(e.get('SIGNALDESK_WHATSAPP_ENABLED') == 'true' and cloud and
-                        e.get('WHATSAPP_ACCESS_TOKEN') and e.get('WHATSAPP_TEMPLATE') and
-                        re.fullmatch(r'\d+', e.get('WHATSAPP_PHONE_NUMBER_ID', '')) and
-                        re.fullmatch(r'\d{8,15}', e.get('WHATSAPP_TO', '')) and
-                        re.fullmatch(r'v\d+\.\d+', e.get('WHATSAPP_GRAPH_VERSION', '')) and
-                        valid_https(e.get('SIGNALDESK_READER_URL', '')))
-        return {'cloud_configured': cloud, 'whatsapp_configured': whatsapp,
-                'automatic_whatsapp': e.get('SIGNALDESK_WHATSAPP_ENABLED') == 'true',
-                'note': 'Only completed briefings sync. New analysis needs the laptop. WhatsApp requires configured credentials and an approved template.'}
+        return {'cloud_configured': cloud, 'note': 'Only completed briefings sync. New analysis needs the laptop.'}
 
     def describe(self):
         return {**self.config(), 'last_run': self.db.get_setting('sync_status'),
@@ -98,31 +75,13 @@ class Delivery:
         finally:
             self.lock.release()
 
-    def retry_rejected(self, digest_id):
-        state = self.db.get_setting(f'delivery:{digest_id}') or {}
-        if state.get('whatsapp') != 'rejected':
-            raise ValueError('Only explicitly rejected submissions can be retried. Submitted or uncertain sends require checking WhatsApp first.')
-        if not self.config()['whatsapp_configured']:
-            raise ValueError('Complete WhatsApp configuration before retrying.')
-        if not self.lock.acquire(blocking=False):
-            raise ValueError('A sync is in progress. Try again after it finishes.')
-        try:
-            row = self.db.one('SELECT * FROM digests WHERE id = ?', (digest_id,))
-            if not row or row['status'] != 'saved':
-                raise ValueError('The briefing must still be saved.')
-            state.pop('whatsapp', None)
-            self.db.set_setting(f'delivery:{digest_id}', state)
-            self._publish(row)
-        finally:
-            self.lock.release()
-
     def _publish(self, row):
         e = self.env
         state = self.db.get_setting(f'delivery:{row["id"]}') or {'local_id': row['id']}
         remote_id = str(uuid.uuid5(uuid.UUID(self.db.get_setting('sync_instance')), str(row['id'])))
         # Archived/deleted-from-saved briefings are removed from the remote read model.
         base = e['SIGNALDESK_SUPABASE_URL'].rstrip('/')
-        headers = {'apikey': e['SIGNALDESK_SUPABASE_SERVICE_KEY'], 'Authorization': 'Bearer ' + e['SIGNALDESK_SUPABASE_SERVICE_KEY']}
+        headers = auth_headers(e['SIGNALDESK_SUPABASE_SERVICE_KEY'])
         if row['status'] != 'saved':
             if state.get('cloud') == 'synced':
                 r = self.client.delete(base + '/rest/v1/signaldesk_digests', headers=headers,
@@ -140,29 +99,6 @@ class Delivery:
             r.raise_for_status()
             state.update(cloud='synced', fingerprint=fingerprint, remote_id=remote_id, synced_at=now_iso())
             self.db.set_setting(f'delivery:{row["id"]}', state)
-        # Do not flood WhatsApp with historical briefings on first installation.
-        if row['id'] <= self.db.get_setting('delivery_activation')['id']:
-            return
-        if not self.config()['whatsapp_configured'] or state.get('whatsapp'):
-            return
-        # Persist before the network call: after timeout/crash, retry could duplicate a real send.
-        state.update(whatsapp='submission_unknown', attempted_at=now_iso())
-        self.db.set_setting(f'delivery:{row["id"]}', state)
-        body = {'messaging_product': 'whatsapp', 'to': e['WHATSAPP_TO'], 'type': 'template',
-                'template': {'name': e['WHATSAPP_TEMPLATE'], 'language': {'code': e.get('WHATSAPP_LANGUAGE', 'en')},
-                    'components': [{'type': 'body', 'parameters': [{'type': 'text', 'text': summary_text(payload)}]},
-                        {'type': 'button', 'sub_type': 'url', 'index': '0', 'parameters': [{'type': 'text', 'text': remote_id}]}]}}
-        try:
-            r = self.client.post(f'https://graph.facebook.com/{e["WHATSAPP_GRAPH_VERSION"]}/{e["WHATSAPP_PHONE_NUMBER_ID"]}/messages',
-                headers={'Authorization': 'Bearer ' + e['WHATSAPP_ACCESS_TOKEN']}, json=body)
-            if r.is_success:
-                state.update(whatsapp='submitted', message_id=(r.json().get('messages') or [{}])[0].get('id'))
-            elif r.status_code < 500:
-                state.update(whatsapp='rejected', http_status=r.status_code)
-            # 5xx is ambiguous, like a timeout: retain submission_unknown.
-        except Exception:
-            pass
-        self.db.set_setting(f'delivery:{row["id"]}', state)
 
     def _loop(self):
         while not self.stop.is_set():

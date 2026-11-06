@@ -37,3 +37,9 @@ must not be reported as proof of live WhatsApp delivery or real-model accuracy.
 - Phone reader: checked at 390px against a throwaway local stand-in for Supabase. This does not
   prove row-level security, real login, cloud sync or Android behaviour.
 - Still not tested: live Supabase, hosted reader, App Links, WhatsApp receipt, APK on a phone.
+
+## Scope change, 2026-11-06
+
+WhatsApp delivery, the hosted reader and App Links were removed at the owner's request.
+Earlier lines that mention them describe the kit as received. Briefing summaries now appear
+in a Summaries tab in the phone reader.

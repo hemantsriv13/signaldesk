@@ -107,7 +107,7 @@ export default function Settings() {
             ["Context window", `${settings.model.context_tokens} tokens (a token is about 4 characters), up to ${settings.model.max_output_tokens} for the reply`],
             ["Text per request", `about ${settings.model.prompt_char_budget} characters`],
             ["Attempts per item", String(settings.model.max_attempts)],
-            ["Paid AI APIs", "None. Cloud sync and WhatsApp are separate optional services."],
+            ["Paid AI APIs", "None. Cloud sync is a separate optional service."],
           ]} />
           <p className="max-w-[75ch] text-sm text-muted-foreground">Change these in {settings.configFile} and restart SignalDesk. To try the installed 9B model, see "Comparing models" in the README: it runs separately and does not switch this app's model.</p>
         </Section>

@@ -1,15 +1,13 @@
 import json
 import httpx
 import pytest
-from signaldesk.delivery import Delivery, public_snapshot, summary_text
+from signaldesk.delivery import Delivery, auth_headers, public_snapshot
 from signaldesk.discovery import board_from_url, discover
 from signaldesk.netsafe import Response, FetchError
 from signaldesk.db import now_iso
 
 ENV = {'SIGNALDESK_SUPABASE_URL': 'https://project.supabase.co', 'SIGNALDESK_SUPABASE_SERVICE_KEY': 'private-service-key',
-       'SIGNALDESK_OWNER_ID': '00000000-0000-4000-8000-000000000001', 'SIGNALDESK_WHATSAPP_ENABLED': 'true',
-       'WHATSAPP_ACCESS_TOKEN': 'private-meta-token', 'WHATSAPP_PHONE_NUMBER_ID': '123456', 'WHATSAPP_TO': '919999999999',
-       'WHATSAPP_TEMPLATE': 'daily_briefing', 'WHATSAPP_GRAPH_VERSION': 'v23.0', 'SIGNALDESK_READER_URL': 'https://reader.example/'}
+       'SIGNALDESK_OWNER_ID': '00000000-0000-4000-8000-000000000001'}
 
 
 def digest(db, **overrides):
@@ -22,48 +20,9 @@ def test_export_excludes_raw_profile_and_local_detail_links():
     content = {'generated_at': now_iso(), 'jobs': [{'title': 'Job', 'type': 'job', 'id': 1, 'why': ['PRIVATE'], 'detail': '#/jobs/1'}], 'profile': 'CV', 'articles': [], 'notes': []}
     out = json.dumps(public_snapshot(content))
     assert 'PRIVATE' not in out and 'CV' not in out and '#/jobs' not in out
-    assert len(summary_text(public_snapshot(content))) <= 900
 
 
-def test_sync_idempotent_and_whatsapp_not_repeated(engine):
-    calls = []
-    def handler(req):
-        calls.append(req)
-        if 'graph.facebook.com' in str(req.url): return httpx.Response(200, json={'messages': [{'id': 'meta-1'}]})
-        return httpx.Response(201, json={})
-    delivery = Delivery(engine, env=ENV, client=httpx.Client(transport=httpx.MockTransport(handler)))
-    did = digest(engine.db)
-    delivery.tick(); delivery.tick()
-    assert len(calls) == 2
-    assert 'on_conflict' in str(calls[0].url)
-    assert engine.db.get_setting(f'delivery:{did}')['whatsapp'] == 'submitted'
-    assert 'private-service-key' not in json.dumps(delivery.describe())
-    template = json.loads(calls[1].content)['template']
-    assert template['components'][1]['parameters'][0]['text'] == engine.db.get_setting(f'delivery:{did}')['remote_id']
-
-
-def test_historical_digests_sync_without_whatsapp_flood(engine):
-    digest(engine.db)
-    calls = []
-    d = Delivery(engine, env=ENV, client=httpx.Client(transport=httpx.MockTransport(lambda r: (calls.append(r) or httpx.Response(201, json={})))))
-    d.tick()
-    assert len(calls) == 1 and 'supabase.co' in str(calls[0].url)
-
-
-def test_ambiguous_whatsapp_submission_not_auto_retried(engine):
-    calls = []
-    def handler(req):
-        calls.append(req)
-        if 'graph.facebook.com' in str(req.url): raise httpx.ReadTimeout('maybe accepted')
-        return httpx.Response(201, json={})
-    d = Delivery(engine, env=ENV, client=httpx.Client(transport=httpx.MockTransport(handler)))
-    did = digest(engine.db)
-    d.tick(); d.tick()
-    assert len(calls) == 2
-    assert engine.db.get_setting(f'delivery:{did}')['whatsapp'] == 'submission_unknown'
-
-
-def test_failed_cloud_sync_does_not_send_whatsapp(engine):
+def test_failed_cloud_sync_is_reported(engine):
     calls = []
     d = Delivery(engine, env=ENV, client=httpx.Client(transport=httpx.MockTransport(lambda r: (calls.append(r) or httpx.Response(500)))))
     did = digest(engine.db)
@@ -75,8 +34,7 @@ def test_failed_cloud_sync_does_not_send_whatsapp(engine):
 
 def test_archived_synced_copy_is_removed(engine):
     calls = []
-    env = {**ENV, 'SIGNALDESK_WHATSAPP_ENABLED': 'false'}
-    d = Delivery(engine, env=env, client=httpx.Client(transport=httpx.MockTransport(lambda r: (calls.append(r) or httpx.Response(201, json={})))))
+    d = Delivery(engine, env=ENV, client=httpx.Client(transport=httpx.MockTransport(lambda r: (calls.append(r) or httpx.Response(201, json={})))))
     did = digest(engine.db)
     d.tick()
     engine.db.update('digests', did, {'status': 'archived'})
@@ -109,22 +67,6 @@ def test_delivery_not_configured_does_no_network(engine):
     assert not d.describe()['cloud_configured'] and d.client is None
 
 
-def test_only_rejected_submissions_can_be_retried(engine):
-    replies = [201, 400, 200]
-    calls = []
-    def handler(req):
-        calls.append(req)
-        return httpx.Response(replies.pop(0), json={'messages': [{'id': 'accepted'}]})
-    d = Delivery(engine, env=ENV, client=httpx.Client(transport=httpx.MockTransport(handler)))
-    did = digest(engine.db)
-    d.tick()
-    assert engine.db.get_setting(f'delivery:{did}')['whatsapp'] == 'rejected'
-    d.retry_rejected(did)
-    assert len(calls) == 3 and engine.db.get_setting(f'delivery:{did}')['whatsapp'] == 'submitted'
-    with pytest.raises(ValueError, match='Only explicitly rejected'):
-        d.retry_rejected(did)
-
-
 def test_greenhouse_embed_and_careers_redirect():
     assert board_from_url('https://boards.greenhouse.io/embed/job_board?for=acme')['ats_id'] == 'acme'
     class Redirect:
@@ -133,8 +75,25 @@ def test_greenhouse_embed_and_careers_redirect():
     assert discover(Redirect(), 'https://acme.example/careers')['boards'][0]['ats_id'] == 'acme'
 
 
-def test_whatsapp_variable_has_no_characters_meta_rejects():
-    content = {'jobs': [{'title': 'Lead\n\tPM     AI'}, {'title': 'Second'}], 'articles': [{'title': 'A read'}], 'case': {'title': 'A case'}}
-    text = summary_text(content)
-    assert '\n' not in text and '\t' not in text and '     ' not in text
-    assert 'Lead PM AI' in text and text.startswith('Your SignalDesk briefing')
+def test_sync_uploads_once_and_keeps_secrets_out_of_status(engine):
+    calls = []
+    d = Delivery(engine, env=ENV, client=httpx.Client(transport=httpx.MockTransport(lambda r: (calls.append(r) or httpx.Response(201, json={})))))
+    did = digest(engine.db)
+    d.tick(); d.tick()
+    assert len(calls) == 1 and 'on_conflict' in str(calls[0].url)
+    assert engine.db.get_setting(f'delivery:{did}')['cloud'] == 'synced'
+    assert 'private-service-key' not in json.dumps(d.describe())
+
+
+def test_only_supabase_is_contacted_even_with_old_whatsapp_settings(engine):
+    calls = []
+    env = {**ENV, 'SIGNALDESK_WHATSAPP_ENABLED': 'true', 'WHATSAPP_ACCESS_TOKEN': 'x', 'WHATSAPP_PHONE_NUMBER_ID': '1', 'WHATSAPP_TO': '919999999999', 'WHATSAPP_TEMPLATE': 't', 'WHATSAPP_GRAPH_VERSION': 'v23.0'}
+    d = Delivery(engine, env=env, client=httpx.Client(transport=httpx.MockTransport(lambda r: (calls.append(r) or httpx.Response(201, json={})))))
+    digest(engine.db)
+    d.tick()
+    assert calls and all(r.url.host == 'project.supabase.co' for r in calls)
+
+
+def test_new_secret_keys_are_not_sent_as_bearer_tokens():
+    assert auth_headers('sb_secret_abc') == {'apikey': 'sb_secret_abc'}
+    assert auth_headers('legacy.jwt.key')['Authorization'] == 'Bearer legacy.jwt.key'

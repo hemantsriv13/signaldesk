@@ -6,7 +6,7 @@ if (Test-Path -LiteralPath $SecretsFile) {
         if ($value -eq '' -or $value.StartsWith('#')) { continue }
         $pair = $value -split '=', 2
         if ($pair.Count -ne 2 -or $pair[0] -notmatch '^[A-Z][A-Z0-9_]*$') { throw 'Invalid integration environment file.' }
-        if ($pair[0] -notmatch '^(SIGNALDESK_|WHATSAPP_)') { throw 'Only integration variables belong in this file.' }
+        if ($pair[0] -notmatch '^SIGNALDESK_') { throw 'Only integration variables belong in this file.' }
         [Environment]::SetEnvironmentVariable($pair[0], $pair[1], 'Process')
     }
 }

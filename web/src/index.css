@@ -385,8 +385,8 @@ button, [role="button"] { touch-action: manipulation; }
 .mobile-item { transition: border-color .15s, transform .15s; }
 .mobile-item:hover { border-color: var(--primary); transform: translateY(-2px); }
 .mobile-item:focus-visible { outline: 3px solid var(--ring); outline-offset: 3px; }
-.mobile-nav { position: fixed; bottom: 0; left: 50%; transform: translateX(-50%); display: flex; width: min(900px, 100%); justify-content: space-around; padding: 12px 8px max(12px, env(safe-area-inset-bottom)); border-top: 1px solid var(--border); background: var(--card); z-index: 20; }
-.mobile-nav button { min-height: 44px; padding: 10px 16px; border-radius: 12px; font-size: 14px; }
+.mobile-nav { position: fixed; bottom: 0; left: 50%; transform: translateX(-50%); display: flex; width: min(900px, 100%); justify-content: space-around; padding: 12px 4px max(12px, env(safe-area-inset-bottom)); border-top: 1px solid var(--border); background: var(--card); z-index: 20; }
+.mobile-nav button { flex: 1; min-height: 44px; padding: 10px 2px; border-radius: 12px; font-size: 13px; }
 .mobile-nav button.active { color: var(--primary-text); background: var(--primary-wash); font-weight: 600; }
 @media (prefers-reduced-motion: reduce) { .mobile-item { transition: none; } }
 .mobile-shell button, .mobile-shell input { min-height: 44px; }

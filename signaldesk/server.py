@@ -503,17 +503,8 @@ def create_app(engine: Engine, scheduler: Scheduler | None = None) -> FastAPI:
     def delivery_status():
         return delivery.describe()
 
-    @app.post("/api/delivery/retry/{digest_id}")
-    def retry_delivery(digest_id: int):
-        try:
-            delivery.retry_rejected(digest_id)
-        except ValueError as exc:
-            raise HTTPException(400, str(exc)) from None
-        return delivery.describe()
-
     @app.post("/api/delivery/sync")
     def sync_now():
-        # A configured automatic WhatsApp sender may submit new, unsent digests.
         delivery.tick()
         return delivery.describe()
 

@@ -90,7 +90,7 @@ Your profile is `profile.json` in the data folder (shape: `profile.example.json`
 - Model time, retries and errors.
 - Token counts only where the server reported them.
 
-Paid AI APIs are not used. Optional Supabase cloud sync and WhatsApp messaging can incur provider charges. No money or electricity figures are estimated.
+Paid AI APIs are not used. Optional Supabase cloud sync can incur provider charges. No money or electricity figures are estimated.
 
 **Scheduling.** Off by default. When turned on in Settings, SignalDesk runs every agent daily at a set time (Asia/Kolkata):
 - It runs only while the app is running.
@@ -211,14 +211,12 @@ Saving changed facts makes previous analyses outdated; it does not rewrite
 historical saved digests or automatically spend model calls on all stored jobs.
 
 
-## V2 upgrade: welcoming UI, career discovery, phone reader and WhatsApp
+## V2 upgrade: career discovery and phone reader
 
-See [docs/V2_SETUP.md](docs/V2_SETUP.md) for the complete architecture, setup,
-Android APK build instructions, account/domain requirements and verification checks.
-The Android reader uses Capacitor and bundles its assets; Expo Go is not required.
-Local Colibri remains responsible for AI analysis. Finished selected briefings can
-sync to a private authenticated cloud reader. Automatic WhatsApp delivery requires
-your own configured Business Platform sender and approved template.
+See [docs/V2_SETUP.md](docs/V2_SETUP.md) for architecture, setup and APK build steps.
+The Android reader uses Capacitor and bundles its screens; Expo Go is not required.
+Local Colibri remains responsible for AI analysis. Finished briefings can sync to a
+private cloud reader that needs your login.
 
 ### V2 status
 
@@ -229,12 +227,6 @@ Only items tested on the real app are listed as working. Last updated 2026-11-06
 | Desktop interface (Today, Sources, Settings) | Working | Opened in a browser with real data at desktop and 390px widths |
 | Careers-page discovery | Working for Greenhouse, Lever and Ashby links in the page's HTML | Real sites. Pages that load jobs with JavaScript find nothing and need manual entry |
 | Colibri CV matching | Working | Real job analysed by the local model; result cited profile facts |
-| Phone reader screens | Tested against a local stand-in only | Layout, login errors, tabs and links. Not proof of the real cloud |
-| Private cloud reader (Supabase) | Awaiting setup | Needs your account; row-level security not yet tested on a live project |
-| Hosted reader and App Links | Awaiting setup | Needs a host, domain and signing certificate |
-| WhatsApp summaries | Off, awaiting setup | Mocked tests only. No real message has been sent |
+| Phone reader screens, including Summaries | Tested against a local stand-in only | Layout, login errors, tabs and links. Not proof of the real cloud |
+| Private cloud reader (Supabase) | Awaiting setup | Needs your account; privacy rules not yet tested on a live project |
 | Android APK from this code | Awaiting build | Needs Android SDK licence acceptance; not yet tested on a phone |
-
-The repository includes integration code and the native project. External cloud
-provisioning, provider approval, verified App Links and a real phone delivery test
-are separate deployment steps; generated source code is not proof of live delivery.
