@@ -51,4 +51,6 @@ in a Summaries tab in the phone reader.
 - Owner-reported on a real Android phone: login, Summaries, opening a briefing, source links and
   Back, reading with the laptop shut down on mobile data, Airplane mode reading, and sign-out clearing.
 - The APK's contents were scanned: the project URL and public key are present, the secret key is not.
-- Not tested: a newly generated briefing reaching the phone, font scaling and keyboard use on the phone.
+- A newly generated briefing uploaded automatically, is in the cloud under the owner's account, and
+  the owner reported it working on the phone.
+- Not tested: font scaling and keyboard use on the phone.

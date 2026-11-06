@@ -232,7 +232,7 @@ Only items tested on the real app are listed as working. Last updated 2026-11-06
 | Reading with the laptop off | Working | Laptop shut down, phone on mobile data |
 | Reading with no internet | Working | Airplane mode, with a saved login session |
 | Sign-out clears the phone's copies | Working | Checked in Airplane mode after signing out |
-| A new briefing reaching the phone | Not tested end to end | Only existing briefings have been synced so far |
+| A new briefing reaching the phone | Working | Run on the laptop, uploaded automatically, confirmed in the cloud and on the phone |
 | Automatic updates to the app | Not set up | The app has a test signature. A permanent signature needs a reinstall once |
 
 Limits: new briefings need the laptop and Colibri running. Start with
