@@ -50,7 +50,15 @@ def main():
     def sign_in(login):
         r = client.post(url + '/auth/v1/token', params={'grant_type': 'password'}, headers={'apikey': key},
                         json={'email': login[0], 'password': login[1]})
-        return r.json() if r.status_code == 200 else None
+        if r.status_code == 200:
+            return r.json()
+        # The error code names the cause and contains no credentials.
+        try:
+            reason = r.json().get('error_code') or r.json().get('error') or 'unknown'
+        except ValueError:
+            reason = 'unknown'
+        print(f'      Sign-in refused: HTTP {r.status_code}, {reason}')
+        return None
 
     def as_user(session):
         return {'apikey': key, 'Authorization': 'Bearer ' + session['access_token']}

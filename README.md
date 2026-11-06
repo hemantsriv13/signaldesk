@@ -228,5 +228,5 @@ Only items tested on the real app are listed as working. Last updated 2026-11-06
 | Careers-page discovery | Working for Greenhouse, Lever and Ashby links in the page's HTML | Real sites. Pages that load jobs with JavaScript find nothing and need manual entry |
 | Colibri CV matching | Working | Real job analysed by the local model; result cited profile facts |
 | Phone reader screens, including Summaries | Tested against a local stand-in only | Layout, login errors, tabs and links. Not proof of the real cloud |
-| Private cloud reader (Supabase) | Awaiting setup | Needs your account; privacy rules not yet tested on a live project |
-| Android APK from this code | Awaiting build | Needs Android SDK licence acceptance; not yet tested on a phone |
+| Private cloud sync (Supabase) | Working | Real briefings uploaded; `scripts/verify_cloud.py` passed on the live project with two accounts |
+| Android APK from this code | Built, not yet tested on a phone | Build and signature checked; secret key absent from the file |

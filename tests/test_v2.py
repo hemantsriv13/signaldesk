@@ -97,3 +97,13 @@ def test_only_supabase_is_contacted_even_with_old_whatsapp_settings(engine):
 def test_new_secret_keys_are_not_sent_as_bearer_tokens():
     assert auth_headers('sb_secret_abc') == {'apikey': 'sb_secret_abc'}
     assert auth_headers('legacy.jwt.key')['Authorization'] == 'Bearer legacy.jwt.key'
+
+
+def test_changing_owner_uploads_again_under_the_new_account(engine):
+    calls = []
+    client = httpx.Client(transport=httpx.MockTransport(lambda r: (calls.append(r) or httpx.Response(201, json={}))))
+    digest(engine.db)
+    Delivery(engine, env=ENV, client=client).tick()
+    new_owner = '00000000-0000-4000-8000-000000000002'
+    Delivery(engine, env={**ENV, 'SIGNALDESK_OWNER_ID': new_owner}, client=client).tick()
+    assert len(calls) == 2 and json.loads(calls[1].content)['owner_id'] == new_owner

@@ -91,7 +91,8 @@ class Delivery:
                 self.db.set_setting(f'delivery:{row["id"]}', state)
             return
         payload = public_snapshot(json.loads(row['content_json']))
-        fingerprint = hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()
+        # Includes the owner so changing accounts uploads the briefings again.
+        fingerprint = hashlib.sha256(json.dumps({'owner': e['SIGNALDESK_OWNER_ID'], 'payload': payload}, sort_keys=True).encode()).hexdigest()
         if state.get('fingerprint') != fingerprint or state.get('cloud') != 'synced':
             r = self.client.post(base + '/rest/v1/signaldesk_digests', headers={**headers, 'Prefer': 'resolution=merge-duplicates'},
                 params={'on_conflict': 'owner_id,id'}, json={'id': remote_id, 'owner_id': e['SIGNALDESK_OWNER_ID'],
