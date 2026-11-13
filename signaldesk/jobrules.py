@@ -38,6 +38,13 @@ LOCATION_LABEL = {
 }
 
 
+# The views the app shows: Bengaluru (incl. explicitly Bengaluru-based hybrid), remote open to India,
+# uncertain (kept out of top matches until there is evidence) and elsewhere.
+LOCATION_GROUP = {"bengaluru": "bengaluru", "remote_india": "remote_india", "remote_unclear": "uncertain", "india_unspecified": "uncertain",
+                  "unknown": "uncertain", "india_other": "elsewhere", "remote_other": "elsewhere", "other": "elsewhere"}
+GROUP_LABEL = {"bengaluru": "Bengaluru", "remote_india": "Remote, open to India", "uncertain": "Location uncertain", "elsewhere": "Elsewhere"}
+
+
 def classify_location(location: str | None, workplace: str | None = None, description: str | None = None) -> LocationVerdict:
     loc = (location or "").strip()
     both = f"{loc} {workplace or ''}".strip()
@@ -153,16 +160,20 @@ def compensation_note(salary_text: str | None, salary_kind: str | None, threshol
 
 # ---------------------------------------------------------------- role family
 FAMILIES = [
-    ("applied_ai_product", "Applied AI product",
-     r"\b(ai|ml|genai|gen ai|llm|machine learning|agents?)\b.{0,30}\bproduct\b|\bproduct\b.{0,40}\b(ai|ml|genai|llm|agents?)\b"),
+    ("applied_ai_product", "AI product and evaluations",
+     r"\b(ai|ml|genai|gen ai|llm|machine learning|agents?)\b.{0,30}\bproduct\b|\bproduct\b.{0,40}\b(ai|ml|genai|llm|agents?)\b"
+     r"|\b(ai|llm|ml|model) evals?\b|\b(ai|llm|ml|model) evaluations?\b|\bevals? (lead|manager|engineer|specialist|analyst|strategist)"),
     ("solutions", "Solutions and implementation",
      r"solutions? (engineer|architect|consultant|lead|manager|specialist)|forward[- ]deployed|implementation|deployment (engineer|strategist|lead|manager)"
      r"|customer engineer|technical (consultant|solutions)|professional services|onboarding (engineer|manager|specialist)"
      r"|applied ai (engineer|specialist|consultant|strategist|lead)|ai (deployment|solutions|strategist|consultant|adoption)|value engineer"),
     ("product_analytics", "Product analytics",
      r"product analy|analytics (lead|manager)|data analyst|business analyst|insights (analyst|manager|lead)|decision scien|analytics engineer|business intelligence|bi (analyst|engineer|developer)"),
-    ("founders_office", "Founder's office and strategy",
-     r"founder'?s'? office|chief of staff|strategy (and|&) operations|biz ?ops|business operations|strategy (manager|lead|associate|analyst)|special projects|strategic (initiatives|operations)"),
+    ("founders_office", "Founder's office and chief of staff",
+     r"founder'?s'? office|founders office|office of the (ceo|founders?)|chief of staff"),
+    ("strategy_ops", "Strategy and business operations",
+     r"strategy (and|&) operations|\bs ?& ?o\b|biz ?ops|business operations|strategic (initiatives|operations|projects)"
+     r"|product strategy|strategy (manager|lead|associate|analyst|director|head)|\bstrategy\b"),
 ]
 GENERAL_PM = r"product manager|product lead|product owner|\bapm\b|product management"
 AMBIGUOUS = (r"data scientist|program manager|customer success|technical account manager|operations (manager|lead|analyst)|consultant|strategist|"
@@ -184,25 +195,170 @@ def role_family(title: str) -> str:
     return "other"
 
 
-def bucket(title: str, family: str, loc_cls: str, wanted_families: list[str]) -> tuple[str, str]:
-    """Return (candidate | review | outside, reason in plain words)."""
+def bucket(title: str, family: str | list[str], loc_cls: str, wanted_families: list[str]) -> tuple[str, str]:
+    """Return (candidate | review | outside, reason in plain words). `family` may be one family or
+    the job's full list of families; the job is a target when any of them is wanted."""
+    fams = [f for f in (family if isinstance(family, list) else [family]) if f] or ["other"]
     if re.search(TOO_JUNIOR, title, re.I):
         return "outside", "Internship or trainee role"
     if loc_cls in ("remote_other", "other", "india_other"):
         return "outside", f"Location: {LOCATION_LABEL[loc_cls].lower()}"
-    if family == "other":
-        return "outside", "Title outside your role families"
-    target = family in wanted_families
+    if fams == ["other"]:
+        return "outside", "Title and duties outside your role families"
+    hits = [f for f in fams if f in wanted_families]
+    lead = hits[0] if hits else fams[0]
     loc_ok = loc_cls in ("bengaluru", "remote_india")
-    if target and loc_ok:
+    if hits and loc_ok:
         if re.search(TOO_SENIOR, title, re.I):
             return "review", "Seniority in the title may be above your experience"
-        return "candidate", f"{FAMILY_LABEL[family]} role, {LOCATION_LABEL[loc_cls]}"
-    if not target and family not in ("ambiguous", "product_management"):
-        return "outside", f"{FAMILY_LABEL[family]} is not in your selected role families"
+        return "candidate", f"{' + '.join(FAMILY_LABEL[f] for f in hits)} role, {LOCATION_LABEL[loc_cls]}"
+    if not hits and not set(fams) & {"ambiguous", "product_management"}:
+        return "outside", f"{FAMILY_LABEL[lead]} is not in your selected role families"
     reasons = []
     if not loc_ok:
         reasons.append(LOCATION_LABEL[loc_cls])
-    if not target:
-        reasons.append(f"title is {FAMILY_LABEL[family].lower()}")
+    if not hits:
+        reasons.append(f"title is {FAMILY_LABEL[lead].lower()}")
     return "review", "Check: " + "; ".join(reasons)
+
+
+# ---------------------------------------------------------------- roles from duties
+# Titles alone mislead in both directions: "Special Projects" reporting to the founder is a
+# founder's-office role; "account strategy" in a sales posting is not a strategy role.
+SALES_TITLE = re.compile(r"\b(sales|account (executive|manager|director|lead)|business development|\bbdr\b|\bsdr\b|inside sales|key account|"
+                         r"customer success|partnerships? (manager|executive|associate))\b", re.I)
+ASSISTANT_TITLE = re.compile(r"\b(executive assistant|personal assistant|administrative|admin assistant|office manager|receptionist|\bea\b)\b", re.I)
+EXPLICIT_FOUNDER = re.compile(r"chief of staff|founder'?s'? office|founders office|office of the (ceo|founders?)", re.I)
+FOUNDER_DUTIES = [
+    r"report(s|ing)? (directly )?(in)?to (the |our )?(co-?)?founders?\b|report(s|ing)? (directly )?to (the |our )?ceo\b",
+    r"work(s|ing)? (closely|directly|side by side|hand in hand) with (the |our )?((co-?)?founders?|ceo)\b",
+    r"office of the (ceo|founders?)",
+    r"(own|owns|owning|drive|drives|driving|lead|leads|leading|run|runs|running)\b.{0,40}\b(cross-functional|company-wide|strategic)\b.{0,20}\b(initiatives?|projects?|launch(es)?|programs?)",
+    r"special projects",
+    r"\b(zero to one|0 ?(to|->|→) ?1)\b",
+    r"(ceo|founders?)'?s? (priorities|agenda|initiatives|top priorities)",
+]
+STRATEGY_DUTIES = [
+    r"(business|strategic|annual|quarterly) (planning|reviews?)|operating (cadence|plan|rhythm)|\bokrs?\b|board (decks?|meetings?|materials)",
+    r"market (sizing|entry|research)|go-to-market strategy|pricing strategy|(company|business|growth) strategy|competitive (analysis|landscape)",
+    r"unit economics|\bp&l\b|business cases?|investment memos?",
+]
+AI_DUTIES = [r"\b(llms?|genai|gen ai|large language models?|ai agents?|foundation models?)\b",
+             r"\bevals?\b|evaluation (sets?|frameworks?|pipelines?|harness)|model (quality|behaviou?r)|\bai products?\b"]
+ASSISTANT_DUTIES = re.compile(r"\b(calendar|scheduling meetings|travel (arrangements|bookings?)|expense reports?|inbox management|meeting logistics)\b", re.I)
+PRODUCTISH_TITLE = re.compile(r"\b(product|operations|ops|associate|analyst|manager|lead|generalist|special projects|program)\b", re.I)
+
+
+def _sentences(text: str | None) -> list[str]:
+    parts = re.split(r"(?<=[.!?])\s+|\n+", text or "")
+    return [p.strip(" -•*\t") for p in parts if 12 <= len(p.strip()) <= 400]
+
+
+def _duty_hits(sentences: list[str], patterns: list[str]) -> tuple[int, list[str]]:
+    matched, lines = set(), []
+    for pat in patterns:
+        for s in sentences:
+            if re.search(pat, s, re.I):
+                matched.add(pat)
+                if s not in lines:
+                    lines.append(s)
+                break
+    return len(matched), lines
+
+
+def classify_roles(title: str, description: str | None = None) -> tuple[list[str], list[str], bool]:
+    """Return (families, evidence sentences, ambiguous). Several families can apply to one job.
+    `ambiguous` marks a job worth one local-model look when its location already qualifies."""
+    fams = [key for key, _label, pat in FAMILIES if re.search(pat, title, re.I)]
+    sales, assistant = bool(SALES_TITLE.search(title)), bool(ASSISTANT_TITLE.search(title))
+    explicit = bool(EXPLICIT_FOUNDER.search(title))
+    if (sales or assistant) and not explicit:
+        # "Account strategy", "strategic accounts" or an EA to the CEO are not these roles.
+        fams = [f for f in fams if f not in ("founders_office", "strategy_ops")]
+    sents = _sentences(description)
+    evidence: list[str] = []
+    if not (sales or assistant):
+        n, lines = _duty_hits(sents, FOUNDER_DUTIES)
+        assisting = sum(bool(ASSISTANT_DUTIES.search(s)) for s in sents)
+        needed = 1 if re.search(r"special projects", title, re.I) else 2
+        if n >= needed and assisting < 2 and "founders_office" not in fams:
+            fams.append("founders_office")
+            evidence += lines[:2]
+        n, lines = _duty_hits(sents, STRATEGY_DUTIES)
+        if n >= 2 and PRODUCTISH_TITLE.search(title) and "strategy_ops" not in fams:
+            fams.append("strategy_ops")
+            evidence += lines[:2]
+    if "applied_ai_product" not in fams and re.search(r"\bproduct\b|operations|\bops\b|strategy|founder|chief of staff", title, re.I):
+        n, lines = _duty_hits(sents, AI_DUTIES)
+        if n >= 2:
+            fams.append("applied_ai_product")
+            evidence += lines[:1]
+    if not fams:
+        legacy = role_family(title)
+        blocked = ("founders_office", "strategy_ops") if (sales or assistant) and not explicit else ()
+        fams = [] if legacy == "other" or legacy in blocked else [legacy]
+    ambiguous = (not fams or fams == ["ambiguous"]) and not (sales or assistant) and bool(
+        _duty_hits(sents, FOUNDER_DUTIES)[0] or _duty_hits(sents, STRATEGY_DUTIES)[0])
+    return (fams or ["other"]), list(dict.fromkeys(evidence))[:3], ambiguous
+
+
+# ---------------------------------------------------------------- pay against the target
+UNIT_RANGE = re.compile(r"(\d+(?:\.\d+)?)\s*(?:lpa|lakhs?|l\b|cr(?:ores?)?\b)?\s*(?:-|–|—|to)\s*(?:₹|\binr\b|\brs\.?)?\s*(\d+(?:\.\d+)?)\s*(lpa|lakhs?|l\b|cr(?:ores?)?\b)", re.I)
+UNIT_ONE = re.compile(r"(\d+(?:\.\d+)?)\s*(lpa|lakhs?|l\b|cr(?:ores?)?\b)", re.I)
+RUPEES = re.compile(r"(?:₹|\binr\b|\brs\.?)\s*([\d,]{6,})(?:\s*(?:-|–|—|to)\s*(?:₹|\binr\b|\brs\.?)?\s*([\d,]{6,}))?", re.I)
+NON_ANNUAL = re.compile(r"per\s+(month|week|day|hour)|/(month|mo|week|day|hour)\b|monthly|weekly|daily|hourly|p\.?m\.?\b|stipend", re.I)
+
+
+def _lakh(value: str, unit: str) -> float:
+    return float(value) * (100 if unit.lower().startswith("cr") else 1)
+
+
+def inr_range_lakh(text: str | None) -> tuple[float, float] | None:
+    """(low, high) annual INR in lakh from one figure or one range. None when unclear."""
+    if not text or not re.search(r"₹|\binr\b|\brs\.?|lakh|lpa|crore", text, re.I) or NON_ANNUAL.search(text):
+        return None
+    m = UNIT_RANGE.search(text)
+    if m:
+        return _lakh(m.group(1), m.group(3)), _lakh(m.group(2), m.group(3))
+    m = RUPEES.search(text)
+    if m:
+        lo = int(m.group(1).replace(",", "")) / 100000
+        hi = int(m.group(2).replace(",", "")) / 100000 if m.group(2) else lo
+        return lo, hi
+    found = UNIT_ONE.findall(text)
+    if len(found) == 1:
+        v = _lakh(*found[0])
+        return v, v
+    return None
+
+
+BAND_LABEL = {"above": "Confirmed above target", "overlaps": "Range overlaps target", "below": "Below target", "unknown": "Pay unknown"}
+
+
+def comp_band(salary_text: str | None, salary_kind: str | None, target_lakh: float) -> tuple[str, str]:
+    """Return (above | overlaps | below | unknown, plain explanation). Base and CTC stay distinct:
+    a base below target says nothing about CTC, so it is unknown, never below."""
+    if not salary_text:
+        return "unknown", "Not disclosed"
+    if not re.search(r"₹|\binr\b|\brs\.?|lakh|lpa|crore", salary_text, re.I):
+        return "unknown", "Disclosed in another currency: compare by hand"
+    kind = salary_kind or "unspecified"
+    if "CTC" in kind and "base" in kind:
+        return "unknown", "Several pay components stated: compare by hand"
+    rng = inr_range_lakh(salary_text)
+    if rng is None:
+        return "unknown", "Disclosed, but the amount, range or pay period can't be compared automatically"
+    lo, hi = rng
+    span = f"₹{lo:g}L" if lo == hi else f"₹{lo:g}–{hi:g}L"
+    if "base" in kind:
+        if lo > target_lakh:
+            return "above", f"Base {span}: CTC is at least this, above your ₹{target_lakh:g}L target"
+        if hi > target_lakh:
+            return "overlaps", f"Base {span} overlaps your ₹{target_lakh:g}L target; CTC would be higher"
+        return "unknown", f"Base {span}; CTC not stated, so it can't be compared to your target"
+    label = "CTC" if "CTC" in kind else "Pay (type not stated)"
+    if lo > target_lakh:
+        return "above", f"{label} {span}, above your ₹{target_lakh:g}L target"
+    if hi < target_lakh:
+        return "below", f"{label} {span}, below your ₹{target_lakh:g}L target"
+    return "overlaps", f"{label} {span} overlaps your ₹{target_lakh:g}L target"

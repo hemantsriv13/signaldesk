@@ -7,11 +7,11 @@ import { ago } from "@/lib/format"
 import { href } from "@/lib/router"
 import { cn } from "@/lib/utils"
 
-export function PageHeader({ title, line, action }: { title: string; line?: ReactNode; action?: ReactNode }) {
+export function PageHeader({ title, line, action, sans }: { title: string; line?: ReactNode; action?: ReactNode; sans?: boolean }) {
   return (
     <header className="flex flex-wrap items-end justify-between gap-4">
       <div className="flex min-w-0 flex-col gap-1">
-        <h1 className="font-heading text-2xl font-medium leading-tight">{title}</h1>
+        <h1 className={cn("text-2xl leading-tight", sans ? "font-sans font-semibold tracking-tight" : "font-heading font-medium")}>{title}</h1>
         {line && <p className="max-w-[70ch] text-sm text-muted-foreground">{line}</p>}
       </div>
       {action && <div className="flex flex-wrap items-center gap-2">{action}</div>}
@@ -40,7 +40,7 @@ export function ExternalLink({ url, children, className }: { url: string | null 
 export function Evidence({ quote, found }: { quote: string | null | undefined; found?: boolean }) {
   if (!quote || quote === "unknown") return <p className="text-xs text-muted-foreground">No supporting passage</p>
   return (
-    <figure className="flex flex-col gap-1 rounded-md bg-muted px-3 py-2">
+    <figure className="flex flex-col gap-1 rounded-md bg-(--quote) px-3 py-2 text-(--quote-foreground)">
       <blockquote className="font-heading text-[0.95rem] italic leading-snug">“{quote}”</blockquote>
       {found !== undefined && (
         <figcaption className={cn("text-xs", found ? "text-muted-foreground" : "text-(--warning-text)")}>
@@ -94,26 +94,28 @@ export function Facts({ rows }: { rows: [string, ReactNode][] }) {
  * List on the left, the selected record on the right. Each pane scrolls on its own so the list
  * keeps its place. Below the large breakpoint only one pane shows at a time.
  */
-export function ListDetail({ list, detail, hasSelection, backHref }: { list: ReactNode; detail: ReactNode; hasSelection: boolean; backHref: string }) {
+export function ListDetail({ list, detail, hasSelection, backHref, backLabel = "Back to the list", onBack }: {
+  list: ReactNode; detail: ReactNode; hasSelection: boolean; backHref: string; backLabel?: string; onBack?: () => void
+}) {
   return (
     <div className="grid min-h-[32rem] flex-1 grid-cols-1 gap-4 lg:grid-cols-[minmax(20rem,26rem)_minmax(0,1fr)]">
       <div className={cn("min-h-0 flex-col overflow-hidden rounded-xl border border-border bg-card lg:flex", hasSelection ? "hidden" : "flex")}>{list}</div>
       <div className={cn("min-h-0 flex-col lg:flex", hasSelection ? "flex" : "hidden")}>
         {hasSelection && (
-          <a href={backHref} className="mb-3 text-sm text-(--primary-text) underline underline-offset-2 lg:hidden">Back to the list</a>
+          <a href={backHref} onClick={onBack} className="mb-3 inline-flex min-h-11 items-center text-sm font-medium text-(--primary-text) underline underline-offset-2 lg:hidden">{backLabel}</a>
         )}
-        <div className="min-h-0 flex-1 overflow-y-auto rounded-xl border border-border bg-background">{detail}</div>
+        <div className="rounded-xl border border-border bg-background lg:min-h-0 lg:flex-1 lg:overflow-y-auto">{detail}</div>
       </div>
     </div>
   )
 }
 
-export function ListItem({ selected, to, children }: { selected: boolean; to: string; children: ReactNode }) {
+export function ListItem({ selected, to, children, onClick }: { selected: boolean; to: string; children: ReactNode; onClick?: () => void }) {
   return (
     <li>
-      <a href={to} aria-current={selected ? "true" : undefined}
+      <a href={to} onClick={onClick} aria-current={selected ? "true" : undefined}
         className={cn("flex flex-col gap-1 border-b border-border px-4 py-3 outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset",
-          selected ? "bg-(--primary-wash)" : "hover:bg-secondary")}>
+          selected ? "bg-(--row-selected) text-(--row-selected-foreground) shadow-[inset_3px_0_0_var(--row-indicator)]" : "hover:bg-(--row-hover)")}>
         {children}
       </a>
     </li>

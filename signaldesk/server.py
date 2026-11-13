@@ -16,7 +16,11 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import collect, jobrules
+import hmac
+
+from . import auth, collect, contacts, funding, jobrules, registry, sweep
+from . import lan as lan_mod
+from . import panel as panel_api
 from .cv import MAX_BYTES, preview_cv
 from starlette.concurrency import run_in_threadpool
 from .analysis import LABELS
@@ -80,16 +84,62 @@ class Feed(BaseModel):
 
 class ScheduleBody(BaseModel):
     enabled: bool
-    time: str
+    time: str            # one time or a comma-separated list, e.g. "08:00, 20:00"
+
+class SweepBody(BaseModel):
+    scope: str = "full"
+    trigger: str = "manual"
+
+class SourcePatch(BaseModel):
+    enabled: bool | None = None
+    url: str | None = None
+
+class ListingImport(BaseModel):
+    source: str
+    text: str
+
+class StartupBody(BaseModel):
+    name: str
+    domain: str = ""
+    investor: str = ""
+    round: str = ""
+    amount: str = ""
+    announced_on: str = ""
+    announcement_url: str = ""
+
+class ContactBody(BaseModel):
+    job_id: int | None = None
+    startup_id: int | None = None
+    company: str
+    name: str
+    title: str = ""
+    profile_url: str = ""
+    evidence_url: str = ""
+
+class LoginBody(BaseModel):
+    password: str
+
+class RevokeBody(BaseModel):
+    id: int | None = None
+
+class PanelTokenBody(BaseModel):
+    label: str = "Edge side panel"
+
+class OutreachSettings(BaseModel):
+    autosend: bool | None = None
+    daily_cap: int | None = None
+    stopped: bool | None = None
+    job_ids: list[int] | None = None
 
 
 class _Redact(logging.Filter):
     EMAIL = re.compile(r"[\w.+-]+@[\w-]+\.[\w.]+")
     PHONE = re.compile(r"(?<!\d)(\+?\d[\d -]{8,}\d)(?!\d)")
+    SECRET = re.compile(r"(sdp_[\w-]{20,}|sb_secret_[\w-]+|eyJ[\w-]{20,}\.[\w-]+\.[\w-]+|(?i:bearer)\s+[\w.-]+|__Host-sd_session=[^;\s]+)")
 
     def filter(self, record):
         msg = record.getMessage()
-        record.msg, record.args = self.PHONE.sub("[phone]", self.EMAIL.sub("[email]", msg)), ()
+        record.msg, record.args = self.SECRET.sub("[secret]", self.PHONE.sub("[phone]", self.EMAIL.sub("[email]", msg))), ()
         return True
 
 
@@ -116,17 +166,133 @@ def create_app(engine: Engine, scheduler: Scheduler | None = None) -> FastAPI:
     delivery = Delivery(engine)
     app.state.delivery = delivery
 
+    cfg = engine.cfg
+    throttle = auth.Throttle()
+    lan_hosts, lan_origins = lan_mod.allowed_hosts(cfg), lan_mod.allowed_origins(cfg)
+    PUBLIC_API = ("/api/auth/login", "/api/auth/session")
+
+    def via_lan(request: Request) -> bool:
+        # The only non-loopback listener is the HTTPS one; the loopback app is plain HTTP.
+        return request.url.scheme == "https"
+
+    def login_required(request: Request) -> bool:
+        return via_lan(request) or cfg.auth.require_login_local
+
+    def headers(resp, lan: bool):
+        resp.headers.setdefault("X-Content-Type-Options", "nosniff")
+        resp.headers.setdefault("X-Frame-Options", "DENY")
+        resp.headers.setdefault("Referrer-Policy", "no-referrer")
+        resp.headers.setdefault("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; "
+                                "img-src 'self' data:; font-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'")
+        if lan:
+            resp.headers.setdefault("Strict-Transport-Security", "max-age=31536000")
+            resp.headers.setdefault("Cache-Control", "no-store")
+        return resp
+
+    def deny(code: int, detail: str, lan: bool):
+        return headers(JSONResponse({"detail": detail}, code), lan)
+
     @app.middleware("http")
     async def guard(request: Request, call_next):
+        lan = via_lan(request)
         raw = request.headers.get("host") or ""
-        host = raw[: raw.find("]") + 1] if raw.startswith("[") else raw.rsplit(":", 1)[0]
-        if host not in LOCAL_HOSTS:
-            return JSONResponse({"detail": "SignalDesk only answers requests addressed to this computer."}, 403)
-        if request.method not in ("GET", "HEAD", "OPTIONS"):
-            origin = request.headers.get("origin")
-            if origin and re.sub(r"^https?://", "", origin).rsplit(":", 1)[0] not in LOCAL_HOSTS:
-                return JSONResponse({"detail": "Changes are only accepted from SignalDesk's own pages."}, 403)
-        return await call_next(request)
+        host = (raw[: raw.find("]") + 1] if raw.startswith("[") else raw.rsplit(":", 1)[0]).lower()
+        if lan:
+            if host.strip("[]") not in lan_hosts:
+                return deny(403, "Use the address on your SignalDesk certificate.", lan)
+        elif host not in LOCAL_HOSTS:
+            return deny(403, "SignalDesk only answers requests addressed to this computer.", lan)
+        path, write = request.url.path, request.method not in ("GET", "HEAD", "OPTIONS")
+        authz = request.headers.get("authorization") or ""
+        request.state.session = request.state.panel = None
+        if authz.lower().startswith("bearer "):
+            # Side-panel credential: not ambient (no cookie), so CSRF does not apply; scope does.
+            if not path.startswith("/api/"):
+                return deny(403, "Not allowed.", lan)
+            tok = auth.panel_token(db, authz[7:].strip())
+            if not tok:
+                return deny(401, "Side panel access was revoked or has expired. Pair the panel again from SignalDesk settings.", lan)
+            if not auth.panel_route(path):
+                return deny(403, "The side panel can only import and compare jobs.", lan)
+            request.state.panel = tok
+            return headers(await call_next(request), lan)
+        if write:
+            origin = (request.headers.get("origin") or "").lower()
+            if lan:
+                if origin not in lan_origins:
+                    return deny(403, "Changes are only accepted from SignalDesk's own pages.", lan)
+            elif origin and re.sub(r"^https?://", "", origin).rsplit(":", 1)[0] not in LOCAL_HOSTS:
+                return deny(403, "Changes are only accepted from SignalDesk's own pages.", lan)
+        if path.startswith("/api/") and path not in PUBLIC_API and login_required(request):
+            s = auth.session(db, request.cookies.get(auth.COOKIE), idle_hours=cfg.auth.session_idle_hours)
+            if not s:
+                return deny(401, "Sign in to SignalDesk.", lan)
+            if write and not hmac.compare_digest(request.headers.get("x-csrf-token") or "", s["csrf"]):
+                return deny(403, "This page is out of date. Reload it and try again.", lan)
+            request.state.session = s
+        return headers(await call_next(request), lan)
+
+    # ------------------------------------------------------------ sign-in
+    @app.get("/api/auth/session")
+    def auth_session(request: Request):
+        required = login_required(request)
+        s = auth.session(db, request.cookies.get(auth.COOKIE), idle_hours=cfg.auth.session_idle_hours) if required else None
+        return {"required": required, "authenticated": bool(s) or not required, "csrf": s["csrf"] if s else None,
+                "passwordSet": auth.password_set(cfg.auth_path)}
+
+    @app.post("/api/auth/login")
+    def auth_login(request: Request, body: LoginBody):
+        if not login_required(request):
+            return {"required": False}
+        ip = request.client.host if request.client else "unknown"
+        wait = throttle.blocked(ip)
+        if wait:
+            return JSONResponse({"detail": f"Too many attempts. Try again in {wait // 60 + 1} minutes."}, 429, headers={"Retry-After": str(wait)})
+        if not auth.check_password(cfg.auth_path, body.password):
+            throttle.fail(ip)
+            return JSONResponse({"detail": "That password is not right."}, 401)
+        throttle.ok(ip)
+        token, csrf = auth.create_session(db, max_days=cfg.auth.session_max_days, ip=ip, user_agent=request.headers.get("user-agent"))
+        resp = JSONResponse({"required": True, "authenticated": True, "csrf": csrf})
+        resp.set_cookie(auth.COOKIE, token, max_age=int(cfg.auth.session_max_days * 86400), path="/", secure=True, httponly=True, samesite="strict")
+        return resp
+
+    @app.post("/api/auth/logout")
+    def auth_logout(request: Request):
+        auth.end_session(db, request.cookies.get(auth.COOKIE))
+        resp = JSONResponse({"ok": True})
+        resp.delete_cookie(auth.COOKIE, path="/", secure=True, httponly=True, samesite="strict")
+        return resp
+
+    @app.get("/api/auth/sessions")
+    def auth_sessions(request: Request):
+        current = request.state.session["id"] if request.state.session else None
+        return {"sessions": [{**s, "current": s["id"] == current} for s in auth.list_sessions(db)]}
+
+    @app.post("/api/auth/sessions/revoke")
+    def auth_revoke(request: Request, body: RevokeBody):
+        current = request.state.session["id"] if request.state.session else None
+        if body.id:
+            db.run("DELETE FROM sessions WHERE id = ?", (body.id,))
+            return {"revoked": 1}
+        return {"revoked": auth.revoke_sessions(db, keep_id=current)}
+
+    # ------------------------------------------------------------ side-panel credentials (never reachable with a panel token)
+    @app.get("/api/panel/tokens")
+    def panel_tokens():
+        return {"tokens": auth.list_panel_tokens(db)}
+
+    @app.post("/api/panel/tokens")
+    def new_panel_token(body: PanelTokenBody):
+        tid, token = auth.create_panel_token(db, body.label, cfg.auth.panel_token_days)
+        return {"id": tid, "token": token, "note": "Shown once. Paste it into the side panel; SignalDesk keeps only its hash."}
+
+    @app.delete("/api/panel/tokens/{tid}")
+    def revoke_panel(tid: int):
+        auth.revoke_panel_token(db, tid)
+        return {"tokens": auth.list_panel_tokens(db)}
+
+    panel_api.register(app, engine)
 
     def job_or_404(job_id: int) -> dict:
         j = db.one("SELECT * FROM jobs WHERE id = ?", (job_id,))
@@ -171,16 +337,51 @@ def create_app(engine: Engine, scheduler: Scheduler | None = None) -> FastAPI:
                 "cards": db.scalar("SELECT COUNT(DISTINCT target_id) FROM analyses WHERE kind = 'reading_card'"),
                 "cases": db.scalar("SELECT COUNT(DISTINCT target_id) FROM analyses WHERE kind = 'case_study'"),
                 "everCollected": db.scalar("SELECT COUNT(*) FROM runs WHERE agent IN ('job_scout', 'reading_scout') AND status NOT IN ('failed')"),
+                "funded90": db.scalar("SELECT COUNT(DISTINCT startup_id) FROM funding_events e JOIN startups s ON s.id = e.startup_id "
+                                      "WHERE s.is_demo = 0 AND e.announced_on >= date('now', '-90 day')"),
+                "outreachReady": db.scalar("SELECT COUNT(*) FROM outreach WHERE state = 'drafted'"),
             },
+            "sweep": {"lock": sweep.holder(db), "last": db.get_setting("last_sweep")},
             "failures": failures,
             "latestDigest": {"id": latest["id"], "created_at": latest["created_at"], **json.loads(latest["content_json"])} if latest else None,
             "schedule": scheduler.describe(),
         }
 
     # ------------------------------------------------------------ jobs
+    LOC_GROUPS = {g: tuple(c for c, gg in jobrules.LOCATION_GROUP.items() if gg == g) for g in jobrules.GROUP_LABEL}
+
+    def enrich(rows: list[dict]) -> None:
+        """Fields every job card shows: families, pay against target, freshness, sources, funding."""
+        if not rows:
+            return
+        target = engine.profiles.prefs()["ctc_threshold_lakh"]
+        ids = [r["id"] for r in rows]
+        marks = ",".join("?" * len(ids))
+        srcs: dict[int, list[str]] = {}
+        for s in db.all(f"SELECT job_id, source FROM job_sources WHERE job_id IN ({marks})", ids):
+            srcs.setdefault(s["job_id"], []).append(s["source"])
+        fund = {r["company_id"]: r for r in db.all(
+            "SELECT s.company_id, s.name, MAX(e.announced_on) AS latest FROM startups s JOIN funding_events e ON e.startup_id = s.id "
+            "WHERE s.company_id IS NOT NULL GROUP BY s.company_id")}
+        for r in rows:
+            r["role_families"] = json.loads(r.get("role_families") or "[]") or [r.get("role_family") or "other"]
+            r["family_labels"] = [jobrules.FAMILY_LABEL.get(f, f) for f in r["role_families"]]
+            band, note = jobrules.comp_band(r.get("salary_text"), r.get("salary_kind"), target)
+            r["comp_band"], r["comp_note"] = band, note
+            r["sources"] = sorted(set(srcs.get(r["id"], [])))
+            f = fund.get(r.get("company_id"))
+            r["funded_on"] = f["latest"] if f else None
+
     @app.get("/api/jobs")
-    def jobs(view: str = "matches", status: str = "", q: str = "", sort: str = "first_seen", location: str = ""):
+    def jobs(view: str = "matches", status: str = "", q: str = "", sort: str = "first_seen", location: str = "",
+             family: str = "", locgroup: str = "", comp: str = ""):
         where, args = ["duplicate_of IS NULL"], []
+        if family:
+            where.append("(role_families LIKE ? OR role_family = ?)")
+            args += [f'%"{family}"%', family]
+        if locgroup in LOC_GROUPS:
+            where.append(f"location_class IN ({','.join('?' * len(LOC_GROUPS[locgroup]))})")
+            args += list(LOC_GROUPS[locgroup])
         if view == "matches":
             where.append("bucket = 'candidate' AND listing_state = 'open'")
         elif view == "review":
@@ -203,8 +404,12 @@ def create_app(engine: Engine, scheduler: Scheduler | None = None) -> FastAPI:
             where.append("(title LIKE ? OR employer LIKE ? OR description_text LIKE ?)")
             args += [f"%{q}%"] * 3
         order = {"first_seen": "first_seen_at DESC, id DESC", "published": "COALESCE(published_at, '') DESC", "employer": "employer, title", "title": "title"}.get(sort, "first_seen_at DESC")
-        rows = db.all(f"SELECT id, employer, title, location_raw, location_class, salary_text, bucket, bucket_reason, role_family, status, change_state, "
+        rows = db.all(f"SELECT id, company_id, employer, title, location_raw, workplace_raw, location_class, salary_text, salary_kind, bucket, bucket_reason, role_family, "
+                      f"role_families, role_evidence, verification_state, status, change_state, apply_url, official_url, "
                       f"listing_state, published_at, first_seen_at, last_verified_at, source, injection_flag FROM jobs WHERE {' AND '.join(where)} ORDER BY {order} LIMIT 500", args)
+        enrich(rows)
+        if comp:
+            rows = [r for r in rows if r["comp_band"] == comp]
         if rows:
             ids = [r["id"] for r in rows]
             fits = {r["target_id"]: json.loads(r["output_json"])["match"] for r in db.all(
@@ -219,7 +424,37 @@ def create_app(engine: Engine, scheduler: Scheduler | None = None) -> FastAPI:
             "review": "bucket = 'review' AND listing_state = 'open' AND status NOT IN ('Not relevant', 'Archived')",
             "outside": "bucket = 'outside' AND listing_state = 'open'", "closed": "listing_state = 'no_longer_listed'",
             "saved": "status IN ('Interested', 'Investigate', 'Applied')"}.items()}
-        return {"jobs": rows, "counts": counts, "statuses": JOB_STATUSES, "locationLabels": jobrules.LOCATION_LABEL}
+        return {"jobs": rows, "counts": counts, "statuses": JOB_STATUSES, "locationLabels": jobrules.LOCATION_LABEL,
+                "families": {k: v for k, v in jobrules.FAMILY_LABEL.items() if k not in ("ambiguous", "other")}, "bands": jobrules.BAND_LABEL,
+                "groups": jobrules.GROUP_LABEL}
+
+    @app.get("/api/top")
+    def top(limit: int = 5):
+        """Worth applying to today: open, location-eligible, in your role families, not a model 'not a match'.
+        Funding recency is shown beside each, never added to its rank."""
+        rows = db.all("SELECT * FROM jobs WHERE bucket = 'candidate' AND listing_state = 'open' AND duplicate_of IS NULL "
+                      "AND verification_state = 'board' AND status IN ('New', 'Interested', 'Investigate') ORDER BY first_seen_at DESC LIMIT 200")
+        enrich(rows)
+        out = []
+        for r in rows:
+            fit = engine.latest("job_fit", "job", r["id"])
+            o = fit["output"] if fit and not fit["outdated"] else None
+            if o and o["match"] == "not a match":
+                continue
+            score = {"potential match": 3, "weak match": 1}.get(o["match"] if o else "", 0) + (1 if r["comp_band"] == "above" else 0) \
+                - (1 if r["comp_band"] == "below" else 0) + (1 if r["change_state"] != "unchanged" else 0)
+            evidence = json.loads(r.get("role_evidence") or "[]")
+            quote = next((q["quote"] for q in (o["essential"] if o else []) if q.get("quote_found")), None) or (evidence[0] if evidence else None)
+            facts = {f["id"]: f["text"] for f in (fit["inputs"].get("facts_sent") or [])} if fit else {}
+            point = next((facts.get(fid) for e in (o["evidence"] if o else []) for fid in e["facts"] if facts.get(fid)), None)
+            out.append((score, r["first_seen_at"], {
+                **{k: r[k] for k in ("id", "title", "employer", "location_raw", "location_class", "family_labels", "comp_band", "comp_note",
+                                     "apply_url", "official_url", "first_seen_at", "published_at", "last_verified_at", "funded_on", "status")},
+                "match": o["match"] if o else None, "reason": r["bucket_reason"], "evidence": quote, "background": point,
+                "gap": (o["gaps"][0] if o and o["gaps"] else None), "verified_hours_ago": _hours(r["last_verified_at"]),
+                "location_label": jobrules.LOCATION_LABEL.get(r["location_class"] or "unknown")}))
+        out.sort(key=lambda x: (x[0], x[1]), reverse=True)
+        return {"jobs": [x[2] for x in out[:limit]]}
 
     @app.get("/api/jobs/{job_id}")
     def job(job_id: int):
@@ -228,7 +463,12 @@ def create_app(engine: Engine, scheduler: Scheduler | None = None) -> FastAPI:
         company = db.one("SELECT id, name, careers_url, verification, last_success_at, last_error FROM companies WHERE id = ?", (j["company_id"],)) if j["company_id"] else None
         versions = db.all("SELECT id, title, location_raw, salary_text, seen_at FROM job_versions WHERE job_id = ? ORDER BY id DESC", (job_id,))
         dups = db.all("SELECT id, title, official_url FROM jobs WHERE duplicate_of = ?", (job_id,))
-        return {**j, "company": company, "versions": versions, "duplicates": dups,
+        enrich([j])
+        found_on = db.all("SELECT source, url, first_seen_at, last_seen_at FROM job_sources WHERE job_id = ? ORDER BY first_seen_at", (job_id,))
+        people = db.all("SELECT c.*, o.id AS outreach_id, o.state, o.note_text, o.message_text, o.drafted_by, o.sent_at, o.updated_at "
+                        "FROM contacts c LEFT JOIN outreach o ON o.contact_id = c.id WHERE c.job_id = ? ORDER BY c.rank, c.id", (job_id,))
+        return {**j, "company": company, "versions": versions, "duplicates": dups, "found_on": found_on, "contacts": people,
+                "funding": funding.for_job(db, j), "role_evidence_list": json.loads(j.get("role_evidence") or "[]"),
                 "fit": engine.latest("job_fit", "job", job_id), "task": pending("job_fit", job_id),
                 "compensation_note": jobrules.compensation_note(j["salary_text"], j["salary_kind"], prefs["ctc_threshold_lakh"]),
                 "location_label": jobrules.LOCATION_LABEL.get(j["location_class"] or "unknown"), "family_label": jobrules.FAMILY_LABEL.get(j["role_family"] or "other"),
@@ -253,6 +493,9 @@ def create_app(engine: Engine, scheduler: Scheduler | None = None) -> FastAPI:
     def recheck_job(job_id: int):
         j = job_or_404(job_id)
         if not j["company_id"]:
+            refusal = collect.fetch_refusal(db, j["official_url"] or "")
+            if refusal:
+                return {"result": f"Not rechecked. {refusal}"}
             try:
                 r = engine.fetcher.get(j["official_url"], check_robots=True)
             except FetchError as e:
@@ -499,6 +742,133 @@ def create_app(engine: Engine, scheduler: Scheduler | None = None) -> FastAPI:
         except (FetchError, ValueError) as exc:
             raise HTTPException(400, str(exc)) from None
 
+    # ------------------------------------------------------------ sweeps and source health
+    @app.post("/api/sweep")
+    def start_sweep(body: SweepBody):
+        trigger = body.trigger if body.trigger in ("manual", "schedule", "catch-up") else "manual"
+        try:
+            return engine.start_all(trigger=trigger, scope=body.scope)
+        except ValueError as e:
+            raise HTTPException(400, str(e)) from None
+
+    @app.get("/api/sweep")
+    def sweep_status():
+        return {"active": [{"id": r["id"], "agent": r["agent"], "agentName": AGENTS[r["agent"]], "status": r["status"], "started_at": r["started_at"]}
+                           for r in engine.active_runs()],
+                "lock": sweep.holder(db), "last": db.get_setting("last_sweep"), "schedule": scheduler.describe(),
+                "scopes": list(sweep.SCOPES), "sources": registry.load(db, engine.cfg.home)}
+
+    @app.patch("/api/sources/registry/{key}")
+    def patch_source(key: str, body: SourcePatch):
+        if not registry.get(db, engine.cfg.home, key):
+            raise HTTPException(404, "Unknown source")
+        try:
+            registry.set_override(db, key, enabled=body.enabled, url=body.url)
+        except ValueError as e:
+            raise HTTPException(400, str(e)) from None
+        return registry.get(db, engine.cfg.home, key)
+
+    @app.post("/api/imports/listings")
+    def import_listings(body: ListingImport):
+        src = registry.get(db, engine.cfg.home, body.source)
+        if not src or src["group"] != "jobs" or src["kind"] == "ats":
+            raise HTTPException(400, "Choose a listing source such as Wellfound.")
+        try:
+            res = collect.import_listings(db, engine.profiles.prefs(), source=body.source, text=body.text)
+        except (ValueError, json.JSONDecodeError) as e:
+            raise HTTPException(400, f"Could not read the import: {e}") from None
+        registry.record(db, body.source, ok=True, counts=res)
+        merged = collect.verify_unverified(db)
+        return {**res, "confirmed_now": merged}
+
+    # ------------------------------------------------------------ funded startups
+    @app.get("/api/funding")
+    def funded(window: str = "180", india: str = "all"):
+        if window not in ("30", "90", "180", "watch"):
+            raise HTTPException(400, "Window must be 30, 90, 180 or watch")
+        return {"startups": funding.startups(db, window=window, india=india),
+                "counts": {w: len(funding.startups(db, window=w, india=india)) for w in ("30", "90", "180", "watch")}}
+
+    @app.get("/api/funding/{sid}")
+    def funded_one(sid: int):
+        s = funding.startup_detail(db, sid)
+        if not s:
+            raise HTTPException(404, "Startup not found")
+        s["contacts"] = db.all("SELECT * FROM contacts WHERE startup_id = ? ORDER BY rank, id", (sid,))
+        return s
+
+    @app.post("/api/funding")
+    def add_startup(body: StartupBody):
+        try:
+            sid = funding.add_manual(db, name=body.name, domain=body.domain, investor=body.investor, round_=body.round, amount=body.amount,
+                                     announced_on=body.announced_on, announcement_url=body.announcement_url)
+        except ValueError as e:
+            raise HTTPException(400, str(e)) from None
+        return {"id": sid}
+
+    @app.post("/api/funding/{sid}/resolve")
+    def resolve_startup(sid: int):
+        db.update("startups", sid, {"careers_checked_at": None, "company_id": None} if not db.scalar(
+            "SELECT company_id FROM startups WHERE id = ?", (sid,)) else {"careers_checked_at": None})
+        res = funding.resolve_careers(db, engine.fetcher, limit=50)
+        return {**res, "startup": funding.startup_detail(db, sid)}
+
+    # ------------------------------------------------------------ contacts and outreach
+    @app.post("/api/jobs/{job_id}/contacts/discover")
+    def discover_contacts(job_id: int):
+        job_or_404(job_id)
+        try:
+            res = contacts.discover_for_job(db, engine.fetcher, job_id)
+        except (FetchError, ValueError) as e:
+            raise HTTPException(400, str(e)) from None
+        profile = engine.profiles.profile()
+        for cid in res["contact_ids"]:
+            if db.scalar("SELECT status FROM contacts WHERE id = ?", (cid,)) != "unresolved":
+                contacts.ensure_draft(db, cid, profile, engine.latest("job_fit", "job", job_id))
+                engine.analyse("outreach_draft", cid, None, 60)
+        return res
+
+    @app.post("/api/contacts")
+    def add_contact(body: ContactBody):
+        try:
+            cid = contacts.add_manual(db, job_id=body.job_id, startup_id=body.startup_id, company=body.company, name=body.name, title=body.title,
+                                      profile_url=body.profile_url, evidence_url=body.evidence_url)
+        except ValueError as e:
+            raise HTTPException(400, str(e)) from None
+        if body.job_id:
+            contacts.ensure_draft(db, cid, engine.profiles.profile(), engine.latest("job_fit", "job", body.job_id))
+            engine.analyse("outreach_draft", cid, None, 60)
+        return {"id": cid}
+
+    @app.get("/api/outreach")
+    def outreach(state: str = ""):
+        where, args = ("WHERE o.state = ?", [state]) if state else ("", [])
+        rows = db.all(f"SELECT o.*, c.name, c.title AS contact_title, c.company, c.profile_url, c.evidence_url, c.why, c.status AS contact_status, "
+                      f"c.verified_at, c.origin, j.title AS job_title, j.apply_url FROM outreach o JOIN contacts c ON c.id = o.contact_id "
+                      f"LEFT JOIN jobs j ON j.id = o.job_id {where} ORDER BY o.updated_at DESC LIMIT 300", args)
+        counts = {r["state"]: r["n"] for r in db.all("SELECT state, COUNT(*) n FROM outreach GROUP BY state")}
+        s = contacts.settings(db)
+        return {"items": rows, "counts": counts, "settings": s,
+                "sending": {"available": engine.messaging.available, "reason": engine.messaging.reason},
+                "unresolved": db.all("SELECT c.*, j.title AS job_title FROM contacts c LEFT JOIN jobs j ON j.id = c.job_id WHERE c.status = 'unresolved' LIMIT 50")}
+
+    @app.post("/api/outreach/{oid}/contacted")
+    def mark_contacted(oid: int):
+        o = db.one("SELECT * FROM outreach WHERE id = ?", (oid,))
+        if not o:
+            raise HTTPException(404, "Not found")
+        if o["state"] in ("sent", "contacted"):
+            return {"state": o["state"]}
+        db.update("outreach", oid, {"state": "contacted", "updated_at": now_iso(), "sent_at": o["sent_at"] or now_iso()})
+        return {"state": "contacted"}
+
+    @app.put("/api/outreach/settings")
+    def outreach_settings(body: OutreachSettings):
+        data = {k: v for k, v in body.model_dump().items() if v is not None}
+        if data.get("autosend") and not engine.messaging.available:
+            raise HTTPException(400, engine.messaging.reason)
+        return contacts.save_settings(db, data)
+
     @app.get("/api/delivery")
     def delivery_status():
         return delivery.describe()
@@ -594,8 +964,11 @@ def create_app(engine: Engine, scheduler: Scheduler | None = None) -> FastAPI:
     @app.get("/api/settings")
     def settings():
         m = engine.cfg.model
+        esc = engine.escalation.status() if engine.escalation else None
         return {"model": {"base_url": m.base_url, "model_id": m.model_id, "context_tokens": m.context_tokens, "max_output_tokens": m.max_output_tokens,
-                          "prompt_char_budget": m.prompt_char_budget, "timeout": m.request_timeout_seconds, "max_attempts": m.max_attempts},
+                          "prompt_char_budget": m.prompt_char_budget, "timeout": m.request_timeout_seconds, "max_attempts": m.max_attempts,
+                          "concurrency": m.concurrency, "escalation_model_id": m.escalation_model_id or None,
+                          "escalation_ready": bool(esc and esc.get("ready")), "escalation_message": esc["message"] if esc else "Not configured"},
                 "limits": vars(engine.cfg.limits), "fetch": {k: v for k, v in vars(engine.cfg.fetch).items()},
                 "dataDir": str(engine.cfg.home), "configFile": str(engine.cfg.home / "config.toml"), "schedule": scheduler.describe(),
                 "server": vars(engine.cfg.server)}

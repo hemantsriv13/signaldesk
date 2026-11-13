@@ -17,6 +17,8 @@ interface RunDetail extends Omit<RunRow, "tasks"> {
 }
 interface Usage { week: Record<string, number | null>; all: Record<string, number | null>; modelsServed: { model_served: string; n: number }[]; paidApis: string; note: string }
 
+const TASK_LABEL: Record<string, string> = { digest_compose: "Briefing", case_select: "Case selection", contact_select: "Contact search", "funding_extract": "Funding announcement", outreach_draft: "Outreach draft" }
+
 const STATUS: Record<string, [string, Tone]> = {
   collecting: ["Collecting", "neutral"], analysing: ["Analysing", "neutral"], done: ["Done", "success"], done_with_errors: ["Done with errors", "warning"],
   failed: ["Failed", "danger"], cancelled: ["Cancelled", "neutral"],
@@ -113,7 +115,7 @@ function RunView({ id, onChange }: { id: number; onChange: () => void }) {
             <TableBody>{data.tasks.map((t) => (
               <TableRow key={t.id}>
                 <TableCell className="max-w-[22rem]">
-                  {link(t) ? <a className="underline-offset-2 hover:underline" href={link(t)!}>{t.target_title ?? `#${t.target_id}`}</a> : <span>{t.kind === "digest_compose" ? "Briefing" : "Case selection"}</span>}
+                  {link(t) ? <a className="underline-offset-2 hover:underline" href={link(t)!}>{t.target_title ?? `#${t.target_id}`}</a> : <span>{TASK_LABEL[t.kind] ?? t.kind.replaceAll("_", " ")}</span>}
                   {(t.error || t.note) && <p className={t.status === "failed" ? "text-xs text-(--destructive-text)" : "text-xs text-muted-foreground"}>{t.status === "failed" ? t.error : t.note}</p>}
                 </TableCell>
                 <TableCell>{t.kind.replace("_", " ")}</TableCell>

@@ -25,7 +25,7 @@ STARTER_PROFILE = {
 
 DEFAULT_PREFS = {
     "locations": ["bengaluru", "remote_india"],
-    "role_families": ["applied_ai_product", "solutions", "product_analytics", "founders_office"],
+    "role_families": ["applied_ai_product", "solutions", "product_analytics", "founders_office", "strategy_ops"],
     "ctc_threshold_lakh": 22,
     "reading_interests": ["applied AI", "enterprise adoption", "evaluation", "AI product development", "operational use cases"],
     "reading_level": "any",            # any | prefer_less_technical

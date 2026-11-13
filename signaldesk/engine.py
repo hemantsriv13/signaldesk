@@ -18,21 +18,30 @@ import traceback
 import uuid
 from datetime import datetime, timedelta, timezone
 
-from . import analysis, collect
+import os
+from concurrent.futures import ThreadPoolExecutor
+from dataclasses import replace
+
+from . import analysis, collect, contacts, funding, registry, sweep
 from .config import Config
 from .db import DB, now_iso
 from .llm import LocalModel, ModelError, ModelUnavailable
-from .netsafe import Fetcher
+from .netsafe import FetchError, Fetcher
 from .profile import ProfileStore
+from .sources import web
 
 log = logging.getLogger("signaldesk")
 
 AGENTS = {
+    "funding_scout": "Funding Scout",
     "job_scout": "Job Scout",
     "reading_scout": "Reading Scout",
     "case_analyst": "Case Study Analyst",
+    "contact_scout": "Contact Scout",
     "digest_editor": "Digest Editor",
+    "source_refresh": "Source refresh",
 }
+MODEL_KINDS = ("job_fit", "reading_card", "case_study", "role_classify", "funding_extract", "outreach_draft")
 ACTIVE = ("collecting", "analysing")
 STALE_JOB_HOURS = 48
 
@@ -53,11 +62,22 @@ class Engine:
         self.stop_flag = threading.Event()
         self.model_state = {"ready": False, "message": "Not checked yet", "checked_at": None}
         self.current_task: int | None = None
+        self.escalation = None
+        if cfg.model.escalation_model_id:
+            esc = replace(cfg.model, model_id=cfg.model.escalation_model_id, base_url=cfg.model.escalation_base_url or cfg.model.base_url)
+            self.escalation = LocalModel(esc)
+        self.messaging = contacts.NoMessaging()     # no authorised messaging integration exists for this project
+        self._start_lock = threading.Lock()
+        self._claim_lock = threading.Lock()
         self._resume()
         self.worker = None
+        self.workers: list[threading.Thread] = []
         if start_worker:
-            self.worker = threading.Thread(target=self._loop, name="signaldesk-queue", daemon=True)
-            self.worker.start()
+            for i in range(max(1, cfg.model.concurrency)):
+                t = threading.Thread(target=self._loop, name=f"signaldesk-queue-{i}", daemon=True)
+                t.start()
+                self.workers.append(t)
+            self.worker = self.workers[0]
 
     # ------------------------------------------------------------ runs
     def _resume(self) -> None:
@@ -85,7 +105,7 @@ class Engine:
                 stats[k] = stats.get(k, 0) + v if isinstance(v, (int, float)) else v
             self.db.update("runs", run_id, {"stats_json": json.dumps(stats)})
 
-    def start_run(self, agent: str, trigger: str = "manual", group_id: str | None = None) -> dict:
+    def start_run(self, agent: str, trigger: str = "manual", group_id: str | None = None, options: dict | None = None) -> dict:
         if agent not in AGENTS:
             raise ValueError("Unknown agent")
         with self.db.write_lock:
@@ -93,20 +113,45 @@ class Engine:
             if busy:
                 return {"id": busy["id"], "already_running": True}
             run_id = self.db.insert("runs", {"agent": agent, "trigger": trigger, "group_id": group_id, "status": "collecting",
-                                             "started_at": now_iso(), "stats_json": "{}", "log_json": "[]"})
+                                             "started_at": now_iso(), "stats_json": "{}", "log_json": "[]",
+                                             "options_json": json.dumps(options or {})})
         threading.Thread(target=self._run_body, args=(run_id, agent), name=f"run-{run_id}", daemon=True).start()
         return {"id": run_id, "already_running": False}
 
-    def start_all(self, trigger: str = "manual") -> dict:
-        """Job Scout and Reading Scout collect now; the Case Study Analyst and Digest Editor are queued
-        behind their analyses, so they see this run's results."""
-        if self.active_runs():
-            return {"started": [], "skipped": "A run is already in progress."}
-        group = uuid.uuid4().hex[:8]
-        started = [self.start_run(a, trigger, group)["id"] for a in ("job_scout", "reading_scout")]
-        started.append(self.start_run("case_analyst", trigger, group)["id"])
-        started.append(self.start_run("digest_editor", trigger, group)["id"])
-        return {"started": started, "group": group}
+    def start_all(self, trigger: str = "manual", scope: str = "full") -> dict:
+        """The single entry point for manual and scheduled sweeps. One sweep at a time, across this
+        app and any scheduled-task process: a second trigger returns the active sweep instead.
+
+        Full sweep order: Funding Scout finds funded startups and their boards; Job Scout then collects
+        every board and listing source; analyses queue; Contact Scout and the Digest Editor wait
+        behind the analyses they depend on."""
+        agents = sweep.agents_for(scope)
+        with self._start_lock:
+            active = self.active_runs()
+            if active:
+                return {"started": [], "skipped": "A sweep is already in progress.", "active": [r["id"] for r in active]}
+            group = uuid.uuid4().hex[:8]
+            owner = f"{os.getpid()}:{group}"
+            held = sweep.acquire(self.db, owner, scope=scope, trigger=trigger, minutes=self.cfg.limits.sweep_lock_minutes)
+            if held:
+                return {"started": [], "skipped": f"Another SignalDesk process is sweeping (since {held['at']}, {held.get('trigger')}).", "lock": held}
+            options = {"scope": scope, "lease": owner}
+            if scope.startswith("source:"):
+                options["source"] = scope.split(":", 1)[1]
+            started = [self.start_run(a, trigger, group, options)["id"] for a in agents]
+        return {"started": started, "group": group, "scope": scope}
+
+    def _options(self, run_id: int) -> dict:
+        return json.loads(self.db.scalar("SELECT options_json FROM runs WHERE id = ?", (run_id,)) or "{}")
+
+    def _wait_for(self, run_id: int, agent: str, minutes: int = 60) -> None:
+        """Let a later agent start after an earlier one in the same sweep has finished collecting."""
+        group = self.db.scalar("SELECT group_id FROM runs WHERE id = ?", (run_id,))
+        deadline = time.monotonic() + minutes * 60
+        while group and time.monotonic() < deadline and not self._cancelled(run_id):
+            if not self.db.scalar("SELECT 1 FROM runs WHERE group_id = ? AND agent = ? AND status = 'collecting'", (group, agent)):
+                return
+            time.sleep(1)
 
     def cancel_run(self, run_id: int) -> dict:
         self.db.run("UPDATE runs SET cancel_requested = 1 WHERE id = ?", (run_id,))
@@ -142,15 +187,40 @@ class Engine:
             log.error("run %s failed: %s", run_id, traceback.format_exc())
             self._log(run_id, f"Run failed: {type(e).__name__}: {e}")
             self.db.update("runs", run_id, {"status": "failed", "finished_at": now_iso()})
+            self._settle_runs()
 
     def _settle_runs(self) -> None:
-        """Close analysing runs whose tasks have all finished."""
+        """Close analysing runs whose tasks have all finished, and release the sweep lock once no run
+        of that sweep is active."""
         for r in self.db.all("SELECT id, cancel_requested FROM runs WHERE status = 'analysing'"):
             counts = {row["status"]: row["n"] for row in self.db.all("SELECT status, COUNT(*) n FROM tasks WHERE run_id = ? GROUP BY status", (r["id"],))}
             if counts.get("queued") or counts.get("running"):
                 continue
             status = "cancelled" if r["cancel_requested"] else ("done_with_errors" if counts.get("failed") else "done")
             self.db.update("runs", r["id"], {"status": status, "finished_at": now_iso()})
+        lease = sweep.holder(self.db)
+        if lease:
+            group = lease["owner"].split(":", 1)[1]
+            mine = lease["owner"].startswith(f"{os.getpid()}:")
+            # Another process's lease is released here only when it has stopped beating (it crashed or
+            # the app restarted) and its sweep has nothing left to do.
+            if (mine or sweep.stale(lease)) and not self.db.scalar(f"SELECT 1 FROM runs WHERE group_id = ? AND status IN {ACTIVE}", (group,)):
+                sweep.release(self.db, lease["owner"])
+                self.db.set_setting("last_sweep", {"group": group, "finished_at": now_iso(), "scope": lease.get("scope"),
+                                                   "trigger": lease.get("trigger"), "summary": self.sweep_summary(group)})
+
+    def sweep_summary(self, group: str) -> dict:
+        totals = {"new": 0, "updated": 0, "duplicates": 0, "failed_sources": 0, "funding_new": 0, "contacts": 0, "drafts": 0}
+        for r in self.db.all("SELECT agent, stats_json, status FROM runs WHERE group_id = ?", (group,)):
+            s = json.loads(r["stats_json"])
+            totals["new"] += s.get("new", 0)
+            totals["updated"] += s.get("changed", 0)
+            totals["duplicates"] += s.get("duplicate", 0) + s.get("merged", 0)
+            totals["failed_sources"] += s.get("sources_failed", 0)
+            totals["funding_new"] += s.get("funding_new", 0)
+            totals["contacts"] += s.get("contacts", 0)
+            totals["drafts"] += s.get("drafts", 0)
+        return totals
 
     # ------------------------------------------------------------ enqueue with cache
     def enqueue(self, run_id: int | None, kind: str, target_type: str, target_id: int, key: str, priority: int = 50) -> str:
@@ -170,6 +240,17 @@ class Engine:
 
     def key_for(self, kind: str, target_id: int) -> str | None:
         m = self.cfg.model.model_id
+        if kind == "role_classify":
+            job = self.db.one("SELECT content_hash FROM jobs WHERE id = ?", (target_id,))
+            return job and analysis.cache_key(kind, model_id=m, content=job["content_hash"], extra={"budget": self.cfg.model.prompt_char_budget})
+        if kind == "funding_extract":
+            a = self.db.one("SELECT url, text FROM announcements WHERE id = ?", (target_id,))
+            return a and analysis.cache_key(kind, model_id=m, content=analysis.sha(a["url"], a["text"] or ""))
+        if kind == "outreach_draft":
+            c = self.db.one("SELECT c.name, c.title, c.evidence_text, c.recipient_key, j.content_hash FROM contacts c JOIN jobs j ON j.id = c.job_id "
+                            "WHERE c.id = ?", (target_id,))
+            # A changed recipient, contact evidence, posting or profile makes the draft stale.
+            return c and analysis.cache_key(kind, model_id=m, content=analysis.sha(dict(c)), extra={"profile": self.profiles.profile_version()})
         if kind == "job_fit":
             job = self.db.one("SELECT content_hash FROM jobs WHERE id = ?", (target_id,))
             return job and analysis.cache_key(kind, model_id=m, content=job["content_hash"], extra={
@@ -182,11 +263,13 @@ class Engine:
             return a and analysis.cache_key(kind, model_id=m, content=a["content_hash"], extra=extra)
         return None
 
+    TARGET = {"job_fit": "job", "role_classify": "job", "funding_extract": "announcement", "outreach_draft": "contact"}
+
     def analyse(self, kind: str, target_id: int, run_id: int | None = None, priority: int = 20) -> str:
         key = self.key_for(kind, target_id)
         if not key:
             raise ValueError("Item not found")
-        return self.enqueue(run_id, kind, "job" if kind == "job_fit" else "article", target_id, key, priority)
+        return self.enqueue(run_id, kind, self.TARGET.get(kind, "article"), target_id, key, priority)
 
     def latest(self, kind: str, target_type: str, target_id: int) -> dict | None:
         row = self.db.one("SELECT * FROM analyses WHERE kind = ? AND target_type = ? AND target_id = ? ORDER BY id DESC LIMIT 1",
@@ -199,9 +282,101 @@ class Engine:
                 "created_at": row["created_at"], "outdated": current != row["cache_key"]}
 
     # ------------------------------------------------------------ collection phases
+    def sources(self) -> list[dict]:
+        return registry.load(self.db, self.cfg.home)
+
+    def _collect_funding_scout(self, run_id: int) -> None:
+        only = self._options(run_id).get("source")
+        srcs = [s for s in self.sources() if s["group"] == "funding" and s["mode"] in ("automatic", "unavailable") and (not only or s["key"] == only)]
+        enqueue = lambda ann_id: self.analyse("funding_extract", ann_id, run_id, 25)  # noqa: E731
+        with ThreadPoolExecutor(max(1, min(len(srcs), self.fetcher.cfg.concurrency))) as ex:
+            results = list(ex.map(lambda s: (s, funding.collect_source(self.db, self.fetcher, s, enqueue)), srcs))
+        ok = failed = funded = 0
+        for s, r in results:
+            if r.get("error"):
+                failed += 1
+                self._log(run_id, f"{s['name']}: {r['error']}. Saved records were kept; unprocessed items stay pending for the next sweep.")
+            else:
+                ok += 1
+                funded += r.get("funding", 0)
+                self._log(run_id, f"{s['name']}: {json.dumps({k: v for k, v in r.items() if v})}")
+        for s in self.sources():
+            if s["group"] == "funding" and s["mode"] == "needs_setup":
+                self._log(run_id, f"{s['name']}: needs setup (no page address yet); skipped.")
+        if self._cancelled(run_id):
+            return
+        careers = funding.resolve_careers(self.db, self.fetcher)
+        self._stat(run_id, sources_ok=ok, sources_failed=failed, funding_new=funded, boards_found=careers["boards"])
+        self._log(run_id, f"Careers pages: {careers['checked']} checked, {careers['boards']} job boards added, "
+                          f"{careers['page_only']} need a manual check, {careers['failed']} could not be reached.")
+
+    def _collect_listing_sources(self, run_id: int, prefs: dict, only: str | None = None) -> dict:
+        """Job listing pages (YC, investor job boards). Boards they link become employers; other
+        listings are kept as unverified until the employer's own board confirms them."""
+        totals = {"listing_sources_ok": 0, "listing_sources_failed": 0, "merged": 0, "unverified": 0, "boards_added": 0}
+        now = now_iso()
+        for s in self.sources():
+            if s["kind"] != "job_listings" or s["mode"] not in ("automatic", "unavailable") or (only and s["key"] != only):
+                continue
+            try:
+                res = web.job_listings(self.fetcher, s["url"])
+            except FetchError as e:
+                registry.record(self.db, s["key"], ok=False, error=str(e))
+                totals["listing_sources_failed"] += 1
+                self._log(run_id, f"{s['name']}: {e}. Nothing was changed.")
+                continue
+            counts: dict[str, int] = {"listings": len(res["postings"]), "boards": len(res["boards"])}
+            for b in res["boards"]:
+                before = self.db.scalar("SELECT 1 FROM companies WHERE ats = ? AND lower(ats_id) = lower(?)", (b["ats"], b["ats_id"]))
+                collect.add_board(self.db, name=b["name"], ats=b["ats"], ats_id=b["ats_id"], careers_url=b["url"], origin=s["key"], tie="source_link",
+                                  verification=f"Linked from {s['name']} ({b['found_on']}); not yet confirmed on the employer's own site")
+                totals["boards_added"] += not before
+            with self.db.batch():
+                for p in res["postings"]:
+                    if not p.get("employer") and p.get("employer_slug"):
+                        p["employer"] = p["employer_slug"].replace("-", " ").title()
+                    r = collect.attach_listing(self.db, p, source=s["key"], prefs=prefs, now=now)
+                    counts[r] = counts.get(r, 0) + 1
+            totals["merged"] += counts.get("merged", 0)
+            totals["unverified"] += counts.get("unverified", 0) + counts.get("ambiguous", 0)
+            totals["listing_sources_ok"] += 1
+            registry.record(self.db, s["key"], ok=True, counts=counts)
+            self._log(run_id, f"{s['name']}: {json.dumps(counts)}")
+        return totals
+
+    def _collect_source_refresh(self, run_id: int) -> None:
+        key = self._options(run_id).get("source")
+        src = next((s for s in self.sources() if s["key"] == key), None)
+        if not src:
+            raise ValueError(f"Unknown source '{key}'")
+        if src["group"] == "funding":
+            return self._collect_funding_scout(run_id)
+        if src["kind"] == "ats":
+            return self._collect_job_scout(run_id)
+        totals = self._collect_listing_sources(run_id, self.profiles.prefs(), only=key)
+        merged = collect.verify_unverified(self.db)
+        self._stat(run_id, **totals, merged_later=merged)
+
+    def _collect_contact_scout(self, run_id: int) -> None:
+        # Waits in the queue behind fit analyses, so it can use them to choose the shortlist.
+        self.db.insert("tasks", {"run_id": run_id, "kind": "contact_select", "target_type": "run", "target_id": run_id, "status": "queued",
+                                 "created_at": now_iso(), "priority": 80, "max_attempts": 1})
+        self._log(run_id, "Waiting for fit analyses, then finding contacts for shortlisted roles.")
+
     def _collect_job_scout(self, run_id: int) -> None:
+        self._wait_for(run_id, "funding_scout")
         prefs = self.profiles.prefs()
         results = collect.collect_jobs(self.db, self.fetcher, prefs, cancelled=lambda: self._cancelled(run_id))
+        failed_boards = sum(bool(r.get("error") or r.get("warning")) for r in results)
+        registry.record(self.db, "ats_boards", ok=failed_boards < len(results) or not results,
+                        counts={"boards": len(results), "failed": failed_boards}, error=None if failed_boards < len(results) else "Every board failed")
+        listing = self._collect_listing_sources(run_id, prefs)
+        merged = collect.verify_unverified(self.db)
+        funding.update_hiring_links(self.db)
+        self._stat(run_id, **listing, merged_later=merged)
+        if listing["listing_sources_ok"] or listing["listing_sources_failed"]:
+            self._log(run_id, f"Listing sources: {listing['merged']} matched to employer boards, {listing['unverified']} kept as unverified, "
+                              f"{listing['boards_added']} new boards; {merged} earlier listings now confirmed on the employer's board.")
         totals = {"sources_ok": 0, "sources_failed": 0, "fetched": 0, "new": 0, "changed": 0, "closed": 0}
         for r in results:
             if r.get("error"):
@@ -219,6 +394,14 @@ class Engine:
                           f"{totals['fetched']} listings, {totals['new']} new, {totals['changed']} changed, {totals['closed']} no longer listed.")
         if self._cancelled(run_id):
             return
+        # Only titles the rules could not place, and only where the location already qualifies:
+        # a clear location mismatch never costs a model call.
+        amb = self.db.all("SELECT id FROM jobs WHERE role_source = 'rules_uncertain' AND listing_state = 'open' AND duplicate_of IS NULL "
+                          "AND location_class IN ('bengaluru', 'remote_india') ORDER BY first_seen_at DESC LIMIT ?",
+                          (self.cfg.limits.max_role_checks_per_run,))
+        roles_queued = sum(self.analyse("role_classify", r["id"], run_id, 28) == "queued" for r in amb)
+        if amb:
+            self._log(run_id, f"{len(amb)} jobs with unclear role titles considered for a role check; {roles_queued} need the model.")
         limit = self.cfg.limits.max_job_analyses_per_run
         rows = self.db.all(
             "SELECT id FROM jobs WHERE bucket = 'candidate' AND listing_state = 'open' AND duplicate_of IS NULL "
@@ -272,7 +455,7 @@ class Engine:
         self.model_state = {**st, "checked_at": now_iso()}
         return self.model_state
 
-    GATED = ("case_select", "digest_compose")
+    GATED = ("case_select", "contact_select", "digest_compose")
 
     def _next_task(self) -> dict | None:
         """Highest-priority ready task. Case selection and briefing composition wait while any run is
@@ -293,9 +476,15 @@ class Engine:
         return None
 
     def _loop(self) -> None:
+        last_beat = 0.0
         while not self.stop_flag.is_set():
             try:
                 worked = self.step()
+                if time.monotonic() - last_beat > 60:
+                    last_beat = time.monotonic()
+                    lease = sweep.holder(self.db)
+                    if lease and lease["owner"].startswith(f"{os.getpid()}:"):
+                        sweep.beat(self.db, lease["owner"])
             except Exception:  # noqa: BLE001
                 log.error("queue loop error: %s", traceback.format_exc())
                 worked = False
@@ -303,20 +492,30 @@ class Engine:
                 self.wake.wait(5)
                 self.wake.clear()
 
+    def _claim(self, task: dict) -> bool:
+        """Atomic across threads and processes: only one worker moves a queued task to running."""
+        with self.db.write_lock:
+            cur = self.db.conn.execute("UPDATE tasks SET status = 'running', started_at = ?, attempts = ? WHERE id = ? AND status = 'queued'",
+                                       (now_iso(), task["attempts"] + 1, task["id"]))
+            self.db.conn.commit()
+            return cur.rowcount == 1
+
     def step(self) -> bool:
         """Process at most one task. Returns True when a task was handled."""
-        task = self._next_task()
-        if not task:
-            self._settle_runs()
-            return False
-        if task["kind"] not in self.GATED and not self.check_model()["ready"]:
-            # Model tasks wait without spending attempts; rule-based steps can still go ahead.
-            task = None
-            if not self.db.scalar("SELECT 1 FROM runs WHERE status = 'collecting'"):
-                task = self.db.one(f"SELECT * FROM tasks WHERE status = 'queued' AND kind IN {self.GATED} ORDER BY priority, id LIMIT 1")
+        with self._claim_lock:
+            task = self._next_task()
             if not task:
+                self._settle_runs()
                 return False
-        self.db.update("tasks", task["id"], {"status": "running", "started_at": now_iso(), "attempts": task["attempts"] + 1})
+            if task["kind"] not in self.GATED and not self.check_model()["ready"]:
+                # Model tasks wait without spending attempts; rule-based steps can still go ahead.
+                task = None
+                if not self.db.scalar("SELECT 1 FROM runs WHERE status = 'collecting'"):
+                    task = self.db.one(f"SELECT * FROM tasks WHERE status = 'queued' AND kind IN {self.GATED} ORDER BY priority, id LIMIT 1")
+                if not task:
+                    return False
+            if not self._claim(task):
+                return True
         self.current_task = task["id"]
         try:
             note = getattr(self, f"_do_{task['kind']}")(task)
@@ -345,13 +544,24 @@ class Engine:
         self._settle_runs()
         return True
 
-    def _call(self, task: dict, purpose: str, prompt: str, max_tokens: int | None = None):
-        rec = {"task_id": task["id"], "run_id": task["run_id"], "purpose": purpose, "model_requested": self.cfg.model.model_id, "started_at": now_iso()}
+    def _call(self, task: dict, purpose: str, prompt: str, max_tokens: int | None = None, escalate: bool = False):
+        model = self.escalation if escalate else self.model
+        wanted = model.cfg.model_id
+        rec = {"task_id": task["id"], "run_id": task["run_id"], "purpose": purpose + (" (larger model)" if escalate else ""),
+               "model_requested": wanted, "started_at": now_iso()}
         try:
-            reply = self.model.chat(analysis.SYSTEM, prompt, max_tokens=max_tokens)
+            reply = model.chat(analysis.SYSTEM, prompt, max_tokens=max_tokens)
         except Exception as e:
             self.db.insert("model_calls", {**rec, "ok": 0, "error": str(e)[:300]})
             raise
+        if escalate:
+            self.db.insert("model_calls", {**rec, "model_served": reply.model_served, "duration_ms": reply.duration_ms, "tokens_in": reply.tokens_in,
+                                           "tokens_out": reply.tokens_out, "finish_reason": reply.finish_reason, "ok": 1})
+            if task["run_id"]:
+                self._stat(task["run_id"], model_requests=1, model_ms=reply.duration_ms, escalations=1)
+            if reply.model_served != wanted or reply.finish_reason == "length":
+                raise ModelError(f"The larger model's reply was unusable ({reply.model_served}, {reply.finish_reason}).")
+            return reply
         self.db.insert("model_calls", {**rec, "model_served": reply.model_served, "duration_ms": reply.duration_ms, "tokens_in": reply.tokens_in,
                                        "tokens_out": reply.tokens_out, "finish_reason": reply.finish_reason, "ok": 1})
         if task["run_id"]:
@@ -382,16 +592,17 @@ class Engine:
             content=job['content_hash'], extra={'profile': profile_version, 'budget': self.cfg.model.prompt_char_budget})
         self.db.update('tasks', task['id'], {'cache_key': task['cache_key']})
         prompt, cov = analysis.job_prompt(job, profile, self._budget(task))
-        reply = self._call(task, "job_fit", prompt)
         sent_profile = {**profile, "facts": [f for f in profile["facts"] if f["id"] in cov["profile_fact_ids"]]}
-        out, val = analysis.validate_job(analysis.parse_json(reply.text), job, sent_profile)
+        (out, val), served, escalated = self._try_both(task, "job_fit", prompt, lambda d: analysis.validate_job(d, job, sent_profile),
+                                                       self.cfg.model.max_output_tokens, unsure=lambda r: r[0]["match"] == "unknown")
+        if escalated:
+            val["notes"].append("Written by the larger local model after the default model's answer failed checks or stayed unknown.")
         if len(sent_profile['facts']) < len(profile['facts']):
             val['notes'].append(f"Used {len(sent_profile['facts'])} of {len(profile['facts'])} profile facts, selected by keyword overlap. Other experience may have been missed; this is a partial assessment.")
         # Fact ids are renumbered when the profile changes, so keep the exact text
         # each cited id had when this assessment was made.
-        inputs = {"coverage": cov, "profile_version": profile_version, "facts_sent": sent_profile["facts"],
-                  "tokens_in": reply.tokens_in, "tokens_out": reply.tokens_out}
-        self._save(task, "job_fit", "job", out, val, inputs, reply.model_served)
+        inputs = {"coverage": cov, "profile_version": profile_version, "facts_sent": sent_profile["facts"], "escalated": escalated}
+        self._save(task, "job_fit", "job", out, val, inputs, served)
         return f"Analysed {cov['chars_sent']:,} of {cov['chars_total']:,} characters"
 
     def _do_reading_card(self, task: dict) -> str:
@@ -434,3 +645,117 @@ class Engine:
         digest = compose(self, task)
         self._log(task["run_id"], f"Briefing {digest['id']} saved.")
         return f"Briefing {digest['id']} saved"
+
+    # ------------------------------------------------------------ the larger model, only when needed
+    def escalation_ready(self) -> bool:
+        return bool(self.escalation) and bool(self.escalation.status().get("ready"))
+
+    def _try_both(self, task: dict, purpose: str, prompt: str, validate, max_tokens: int, unsure=lambda out: False):
+        """Default model first. The larger model is asked only when the first answer fails validation
+        or is unsure, and its answer is used only if it passes the same checks."""
+        first_error, out, served = None, None, None
+        try:
+            reply = self._call(task, purpose, prompt, max_tokens=max_tokens)
+            out, served = validate(analysis.parse_json(reply.text)), reply.model_served
+        except (ValueError, ModelError) as e:
+            first_error = e
+        if (out is None or unsure(out)) and self.escalation_ready():
+            try:
+                reply = self._call(task, purpose, prompt, max_tokens=max_tokens, escalate=True)
+                better = validate(analysis.parse_json(reply.text))
+                if out is None or not unsure(better):
+                    return better, reply.model_served, True
+            except (ValueError, ModelError) as e:
+                if out is None:
+                    raise ModelError(f"Both models failed: {first_error}; larger model: {e}") from None
+        if out is None:
+            raise first_error
+        return out, served, False
+
+    # ------------------------------------------------------------ roles, funding, outreach
+    def _do_role_classify(self, task: dict) -> str:
+        job = self.db.one("SELECT * FROM jobs WHERE id = ?", (task["target_id"],))
+        prompt, cov = analysis.role_prompt(job, self._budget(task))
+        (out, val), served, escalated = self._try_both(task, "role_classify", prompt, lambda d: analysis.validate_roles(d, job), 200,
+                                                       unsure=lambda r: r[0]["confidence"] != "clear")
+        if escalated:
+            val["notes"].append("Decided by the larger local model after the default model was unsure.")
+        self._save(task, "role_classify", "job", out, val, {"coverage": cov}, served)
+        if out["confidence"] != "clear":
+            self.db.update("jobs", job["id"], {"role_source": "model_uncertain"})
+            return "Still unclear; kept in To review"
+        p = {"title": job["title"], "location": job["location_raw"], "workplace": job["workplace_raw"], "description_text": job["description_text"],
+             "salary_extra": None}
+        got = collect.classify(p, self.profiles.prefs(), out["families"])
+        evidence = [out["quote"]] if out["quote"] else []
+        self.db.update("jobs", job["id"], {"role_family": got["role_family"], "role_families": got["role_families"], "role_evidence": json.dumps(evidence),
+                                           "role_source": "model", "bucket": got["bucket"], "bucket_reason": got["bucket_reason"]})
+        return f"Role families: {', '.join(out['families'])}"
+
+    def _do_funding_extract(self, task: dict) -> str:
+        ann = self.db.one("SELECT * FROM announcements WHERE id = ?", (task["target_id"],))
+        prompt = analysis.funding_prompt(ann, self._budget(task))
+
+        def check(d):
+            text = f"{ann['title']}\n{ann['text'] or ''}"
+            if d.get("is_funding_round") and (str(d.get("company") or "").lower() not in text.lower() or not analysis.find_quote(str(d.get("quote") or ""), text)):
+                raise ValueError("The company or quote is not in the announcement.")
+            return d
+        data, served, _esc = self._try_both(task, "funding_extract", prompt, check, 200)
+        status, notes = funding.model_reading(self.db, ann["id"], data)
+        self._save(task, "funding_extract", "announcement", {"company": data.get("company"), "round": data.get("round"), "status": status},
+                   {"notes": notes}, {}, served)
+        return f"Announcement read: {status}"
+
+    def _do_outreach_draft(self, task: dict) -> str:
+        c = self.db.one("SELECT * FROM contacts WHERE id = ?", (task["target_id"],))
+        job = self.db.one("SELECT * FROM jobs WHERE id = ?", (c["job_id"],))
+        profile = self.profiles.profile()
+        fit = self.latest("job_fit", "job", job["id"])
+        fact = contacts.pick_fact(profile, job, fit)
+        prompt = contacts.draft_prompt(c, job, fact, profile)
+        (note, msg), served, _esc = self._try_both(task, "outreach_draft", prompt, lambda d: contacts.validate_draft(d, c, job, fact), 400)
+        o = self.db.one("SELECT * FROM outreach WHERE contact_id = ?", (c["id"],))
+        if o and o["state"] == "drafted":
+            self.db.update("outreach", o["id"], {"note_text": note, "message_text": msg, "drafted_by": "model", "updated_at": now_iso(),
+                                                 "inputs_json": json.dumps({"fact": fact, "detail": contacts.detail_for(c, job), "model": served})})
+        self._save(task, "outreach_draft", "contact", {"note": note, "message": msg}, {"notes": []}, {"fact": fact["id"] if fact else None}, served)
+        return "Draft written" if o and o["state"] == "drafted" else "Draft written; the message was already sent or marked contacted, so it was not replaced"
+
+    def _do_contact_select(self, task: dict) -> str:
+        run_id = task["run_id"]
+        week_ago = _iso_in(-7 * 86400)
+        rows = self.db.all(
+            "SELECT j.* FROM jobs j WHERE j.listing_state = 'open' AND j.duplicate_of IS NULL AND (j.status IN ('Interested', 'Investigate') "
+            "OR (j.bucket = 'candidate' AND j.status = 'New' AND EXISTS (SELECT 1 FROM analyses a WHERE a.kind = 'job_fit' AND a.target_id = j.id "
+            "AND json_extract(a.output_json, '$.match') = 'potential match'))) "
+            "AND NOT EXISTS (SELECT 1 FROM contacts c WHERE c.job_id = j.id AND c.verified_at >= ?) "
+            "ORDER BY (j.status IN ('Interested', 'Investigate')) DESC, j.first_seen_at DESC LIMIT ?", (week_ago[:10], self.cfg.limits.max_contact_jobs_per_run))
+        found = 0
+        for j in rows:
+            try:
+                found += contacts.discover_for_job(self.db, self.fetcher, j["id"])["found"]
+            except (FetchError, ValueError) as e:
+                self._log(run_id, f"Contacts for {j['title']} at {j['employer']}: {e}")
+        # High-priority companies without a matching opening: founders and team, no draft (there is no role yet).
+        for s in self.db.all("SELECT s.* FROM startups s WHERE s.domain IS NOT NULL AND s.is_demo = 0 AND s.india_link != 'unknown' "
+                             "AND EXISTS (SELECT 1 FROM funding_events e WHERE e.startup_id = s.id AND e.announced_on >= ?) "
+                             "AND NOT EXISTS (SELECT 1 FROM contacts c WHERE c.startup_id = s.id) LIMIT 3", (_iso_in(-90 * 86400)[:10],)):
+            people = contacts.from_team_page(self.fetcher, s["domain"], s["name"])
+            for ann in self.db.all("SELECT a.url, a.text FROM funding_events e JOIN announcements a ON a.url = e.announcement_url WHERE e.startup_id = ?", (s["id"],)):
+                people += contacts.from_announcement(ann["text"] or "", ann["url"], s["name"])
+            found += len(contacts.save_contacts(self.db, contacts.rank_for_job(people, {"role_families": "[\"founders_office\"]"}, True),
+                                                job_id=None, startup_id=s["id"], company=s["name"]))
+        profile = self.profiles.profile()
+        drafts = 0
+        for c in self.db.all("SELECT c.id, c.job_id FROM contacts c LEFT JOIN outreach o ON o.contact_id = c.id "
+                             "WHERE c.job_id IS NOT NULL AND o.id IS NULL AND c.status != 'unresolved'"):
+            contacts.ensure_draft(self.db, c["id"], profile, self.latest("job_fit", "job", c["job_id"]))
+            drafts += 1
+            self.analyse("outreach_draft", c["id"], run_id, 85)
+        sent = contacts.send_due(self.db, self.messaging)
+        self._stat(run_id, contacts=found, drafts=drafts, sent=sent.get("sent", 0))
+        msg = (f"{len(rows)} shortlisted role(s) checked: {found} contact(s) found, {drafts} new draft(s). "
+               f"Sending: {sent.get('reason') or str(sent['sent']) + ' sent'}.")
+        self._log(run_id, msg)
+        return msg

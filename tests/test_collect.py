@@ -1,3 +1,5 @@
+import pytest
+
 from signaldesk import collect
 from signaldesk.profile import DEFAULT_PREFS
 
@@ -72,6 +74,12 @@ def test_manual_import_from_page_uses_jobposting(engine, boards):
             '"datePosted":"2026-10-01"}</script></head><body>x</body></html>')
     boards.routes["https://careers.example.com/robots.txt"] = (404, "")
     boards.routes["https://careers.example.com/job/9"] = (200, page)
+    # Only careers sites you track are fetched from an imported link.
+    with pytest.raises(ValueError, match="only fetches"):
+        collect.import_job(engine.db, engine.fetcher, DEFAULT_PREFS, url="https://careers.example.com/job/9")
+    assert not boards.hits
+    from signaldesk.db import now_iso
+    engine.db.insert("companies", {"name": "Example Ltd", "careers_url": "https://careers.example.com/", "ats": "manual", "enabled": 1, "created_at": now_iso()})
     r = collect.import_job(engine.db, engine.fetcher, DEFAULT_PREFS, url="https://careers.example.com/job/9")
     j = engine.db.one("SELECT * FROM jobs WHERE id = ?", (r["id"],))
     assert (j["title"], j["employer"], j["location_class"], j["published_at"]) == ("AI Solutions Consultant", "Example Ltd", "bengaluru", "2026-10-01")

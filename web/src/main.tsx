@@ -4,6 +4,9 @@ import "./index.css"
 import "./lib/offline-icons"
 import App from "./App.tsx"
 
+// Apply the saved theme before the first paint, so every screen (sign-in included) opens in it.
+try { if (localStorage.getItem("theme") === "dark") document.documentElement.classList.add("dark") } catch { /* storage blocked: light */ }
+
 const Mobile = lazy(() => import("./Mobile"))
 const mobile = import.meta.env.VITE_SIGNALDESK_MOBILE === "true"
 

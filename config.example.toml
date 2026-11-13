@@ -15,11 +15,17 @@ max_output_tokens = 512
 prompt_char_budget = 6000                  # characters per request, instructions included: about 1,350 tokens, leaving room for 512 out
 request_timeout_seconds = 180
 max_attempts = 3
+concurrency = 1                            # simultaneous model requests; keep 1 on a 6 GB GPU
+# Optional larger local model, used only when the default model's answer fails checks or stays
+# unsure. Use the exact id your Colibri server reports. Empty = off. Nothing is ever downloaded.
+escalation_model_id = ""
+escalation_base_url = ""                   # empty = same server; set e.g. "http://127.0.0.1:8001/v1" if it runs separately
 
 [fetch]
 concurrency = 4
 timeout_seconds = 20
 per_host_interval_seconds = 1.0
+per_host_concurrency = 2
 max_bytes = 40000000                    # large employers publish all postings in one response
 user_agent = "SignalDesk/0.1 (personal job and reading tracker; local use)"
 
@@ -28,3 +34,23 @@ max_job_analyses_per_run = 12
 max_article_cards_per_run = 10
 max_case_studies_per_run = 2
 items_per_feed = 8
+max_role_checks_per_run = 15             # unclear role titles sent to the model (location must already qualify)
+max_contact_jobs_per_run = 5             # shortlisted roles that get contact discovery each sweep
+sweep_lock_minutes = 180
+
+[lan]
+# LAN mode: one signed-in HTTPS entry point for your phone on your home Wi-Fi. Off unless you start
+# with --lan or set enabled = true. SignalDesk refuses to start LAN mode if anything below is
+# missing or wrong; it never opens a plain HTTP port to your network. See docs\LAN_AND_PANEL.md.
+enabled = false
+bind = ""                                  # this PC's Wi-Fi address, e.g. "192.168.1.10" (never 0.0.0.0)
+port = 8443
+hostnames = []                             # exactly what devices type, all on the certificate, e.g. ["192.168.1.10"]
+cert_file = ''                             # e.g. 'D:\LocalAI\signaldesk\tls\signaldesk.pem'
+key_file = ''                              # e.g. 'D:\LocalAI\signaldesk\tls\signaldesk-key.pem'
+
+[auth]
+session_idle_hours = 12
+session_max_days = 7
+require_login_local = false                # also require sign-in on http://127.0.0.1:8780
+panel_token_days = 90

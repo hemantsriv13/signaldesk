@@ -1,0 +1,55 @@
+{
+  "_note": "SYNTHETIC FIXTURES. Every company, person, posting and announcement here is invented for tests. None of it is real and none of it is loaded into the app's database.",
+  "roles": [
+    {"id": "special-projects", "title": "Special Projects Lead",
+     "description": "About the role\nYou will report directly to the founder and own cross-functional launches across product and operations.\nYou will run the weekly operating cadence.",
+     "expected": ["founders_office"], "not_expected": []},
+    {"id": "sales-account-strategy", "title": "Account Executive, Enterprise",
+     "description": "Own a book of enterprise accounts. Develop account strategy and close new business. Report to the VP of Sales.",
+     "expected": [], "not_expected": ["founders_office", "strategy_ops"]},
+    {"id": "ea-to-ceo", "title": "Executive Assistant to the CEO",
+     "description": "Manage the CEO's calendar, scheduling meetings and travel arrangements. Work closely with the founders on logistics.",
+     "expected": [], "not_expected": ["founders_office", "strategy_ops"]},
+    {"id": "chief-of-staff", "title": "Chief of Staff",
+     "description": "Partner with the CEO on company priorities and board materials.",
+     "expected": ["founders_office"], "not_expected": []},
+    {"id": "office-of-ceo", "title": "Associate, Office of the CEO",
+     "description": "Drive strategic initiatives with the leadership team.",
+     "expected": ["founders_office"], "not_expected": []},
+    {"id": "strategy-ops", "title": "Strategy & Operations Manager",
+     "description": "Lead quarterly planning and business reviews. Build business cases and track unit economics.",
+     "expected": ["strategy_ops"], "not_expected": []},
+    {"id": "ai-evals", "title": "AI Evaluations Lead",
+     "description": "Design evaluation sets for our LLM features and report on model quality.",
+     "expected": ["applied_ai_product"], "not_expected": []},
+    {"id": "product-strategy", "title": "Product Strategy Associate",
+     "description": "Market sizing, competitive analysis and pricing strategy for new products.",
+     "expected": ["strategy_ops"], "not_expected": []}
+  ],
+  "locations": [
+    {"id": "blr-hybrid", "location": "Bengaluru, Karnataka (Hybrid)", "workplace": "Hybrid", "description": "", "expected_class": "bengaluru", "expected_group": "bengaluru"},
+    {"id": "bangalore-spelling", "location": "Bangalore, India", "workplace": null, "description": "", "expected_class": "bengaluru", "expected_group": "bengaluru"},
+    {"id": "remote-india", "location": "Remote - India", "workplace": "Remote", "description": "", "expected_class": "remote_india", "expected_group": "remote_india"},
+    {"id": "remote-us", "location": "Remote - US", "workplace": "Remote", "description": "", "expected_class": "remote_other", "expected_group": "elsewhere"},
+    {"id": "remote-unspecified", "location": "Remote", "workplace": "Remote", "description": "Work from anywhere in your time zone.", "expected_class": "remote_unclear", "expected_group": "uncertain"},
+    {"id": "india-generic", "location": "India", "workplace": null, "description": "", "expected_class": "india_unspecified", "expected_group": "uncertain"}
+  ],
+  "pay": [
+    {"id": "ctc-above", "text": "CTC: ₹30-40 LPA", "kind": "CTC", "expected": "above"},
+    {"id": "ctc-overlaps", "text": "CTC ₹18-26 LPA", "kind": "CTC", "expected": "overlaps"},
+    {"id": "ctc-below", "text": "CTC ₹12-16 LPA", "kind": "CTC", "expected": "below"},
+    {"id": "base-below-is-unknown", "text": "Base salary ₹18 LPA", "kind": "base", "expected": "unknown"},
+    {"id": "base-above", "text": "Base salary ₹25 LPA", "kind": "base", "expected": "above"},
+    {"id": "undisclosed", "text": null, "kind": null, "expected": "unknown"},
+    {"id": "usd", "text": "$120,000 - $150,000 per year", "kind": "unspecified", "expected": "unknown"}
+  ],
+  "announcements": [
+    {"id": "westbridge-recent", "title": "Synthfin Labs raises $12 million Series A led by Fixture Capital",
+     "text": "Bengaluru-based Synthfin Labs raises $12 million Series A led by Fixture Capital. The round was announced today. Synthfin Labs was founded by Asha Rao, co-founder and CEO.",
+     "expected": {"company": "Synthfin Labs", "round": "series_a", "india": true}},
+    {"id": "investment-in", "title": "Our investment in Quillworks",
+     "text": "We are excited to lead the seed round in Quillworks, an India-based workflow startup.",
+     "expected": {"company": "Quillworks", "round": "seed", "india": true}},
+    {"id": "not-funding", "title": "Our thoughts on the year ahead", "text": "A letter to our community.", "expected": {"company": null}}
+  ]
+}

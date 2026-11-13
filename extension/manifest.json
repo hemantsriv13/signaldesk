@@ -1,0 +1,13 @@
+{
+  "manifest_version": 3,
+  "name": "SignalDesk side panel",
+  "version": "0.1.0",
+  "description": "Paste job listings you are reviewing and compare them with your SignalDesk profile. Reads no web pages.",
+  "minimum_chrome_version": "116",
+  "permissions": ["sidePanel", "storage"],
+  "optional_host_permissions": ["https://*/*", "http://127.0.0.1/*", "http://localhost/*"],
+  "background": { "service_worker": "background.js" },
+  "side_panel": { "default_path": "panel.html" },
+  "action": { "default_title": "Open SignalDesk side panel" },
+  "content_security_policy": { "extension_pages": "script-src 'self'; object-src 'none'; base-uri 'none'" }
+}

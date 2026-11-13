@@ -8,8 +8,11 @@
   with backoff on 429/5xx (Retry-After is respected up to a limit).
 * Pages fetched on request (manual URLs) also honour robots.txt.
 
-Known limit: the address check happens before the request, so a DNS answer that changes between
-the check and the connection (DNS rebinding) is not caught.
+The connection itself goes to the address that passed the check: the transport resolves the host
+once, refuses the request if any answer is non-public, and connects to that validated address
+(TLS still verifies the certificate against the host name). A DNS answer that changes between the
+check and the connection therefore cannot redirect the request to a local or private machine.
+Proxy settings from the environment are ignored for the same reason.
 """
 from __future__ import annotations
 
@@ -34,8 +37,88 @@ class BlockedURL(FetchError):
     pass
 
 
+def _embedded_v4(ip: ipaddress._BaseAddress) -> ipaddress._BaseAddress:
+    """The IPv4 address hidden in IPv4-mapped, 6to4, Teredo or NAT64 forms, if any."""
+    if ip.version == 6:
+        if ip.ipv4_mapped:
+            return ip.ipv4_mapped
+        if ip.sixtofour:
+            return ip.sixtofour
+        if ip.teredo:
+            return ip.teredo[1]
+        if ip in ipaddress.ip_network("64:ff9b::/96"):
+            return ipaddress.IPv4Address(int(ip) & 0xFFFFFFFF)
+    return ip
+
+
+def public_ip(ip: ipaddress._BaseAddress) -> bool:
+    """Only globally routable unicast addresses. Loopback, private, link-local, CGNAT, multicast,
+    reserved, unspecified and documentation ranges are refused, in IPv4 and IPv6."""
+    for a in {ip, _embedded_v4(ip)}:
+        if not a.is_global or a.is_multicast or a.is_reserved or a.is_loopback or a.is_link_local or a.is_private or a.is_unspecified:
+            return False
+    return True
+
+
+def resolve_public(host: str, port: int, resolve=socket.getaddrinfo) -> list[str]:
+    """Every address the host resolves to, if all of them are public. Raises otherwise."""
+    try:
+        literal = ipaddress.ip_address(host.strip("[]"))
+    except ValueError:
+        literal = None
+    if literal is not None:
+        if not public_ip(literal):
+            raise BlockedURL("Private and local network addresses are refused.")
+        return [str(literal)]
+    try:
+        infos = resolve(host, port, proto=socket.IPPROTO_TCP)
+    except socket.gaierror as e:
+        raise FetchError(f"Could not resolve {host}.") from e
+    addrs = []
+    for info in infos:
+        ip = ipaddress.ip_address(info[4][0].split("%")[0])
+        if not public_ip(ip):
+            raise BlockedURL("This host points to a private or local network address; it is refused.")
+        addrs.append(str(ip))
+    if not addrs:
+        raise FetchError(f"Could not resolve {host}.")
+    return addrs
+
+
+class PinnedBackend:
+    """httpcore network backend that connects only to addresses validated by resolve_public."""
+
+    def __init__(self, resolve=socket.getaddrinfo):
+        import httpcore
+        self._inner = httpcore.SyncBackend()
+        self._resolve = resolve
+
+    def connect_tcp(self, host, port, timeout=None, local_address=None, socket_options=None):
+        last = None
+        for ip in resolve_public(host, port, self._resolve):
+            try:
+                return self._inner.connect_tcp(ip, port, timeout=timeout, local_address=local_address, socket_options=socket_options)
+            except Exception as e:  # noqa: BLE001 - try the next validated address
+                last = e
+        raise last
+
+    def connect_unix_socket(self, *a, **kw):
+        raise BlockedURL("Unix sockets are not allowed.")
+
+    def sleep(self, seconds):
+        self._inner.sleep(seconds)
+
+
+def pinned_transport(resolve=socket.getaddrinfo) -> httpx.HTTPTransport:
+    import httpcore
+    t = httpx.HTTPTransport(trust_env=False)
+    t._pool = httpcore.ConnectionPool(ssl_context=httpx.create_ssl_context(trust_env=False), max_connections=20,
+                                      max_keepalive_connections=10, keepalive_expiry=5.0, network_backend=PinnedBackend(resolve))
+    return t
+
+
 def check_url(url: str, resolve=socket.getaddrinfo) -> str:
-    """Return the URL if it is safe to fetch, else raise BlockedURL."""
+    """Return the URL if it is safe to fetch, else raise BlockedURL. Runs before any request."""
     p = urlparse(url)
     if p.scheme not in ("http", "https"):
         raise BlockedURL(f"Only http and https links can be fetched (got {p.scheme or 'none'}).")
@@ -47,22 +130,9 @@ def check_url(url: str, resolve=socket.getaddrinfo) -> str:
     if port not in (80, 443):
         raise BlockedURL("Only the standard web ports (80 and 443) are allowed.")
     host = p.hostname.rstrip(".").lower()
-    if host == "localhost" or host.endswith((".localhost", ".local", ".internal", ".lan", ".home.arpa")):
+    if host == "localhost" or host.endswith((".localhost", ".local", ".internal", ".lan", ".home.arpa", ".test", ".intranet", ".corp")) or "." not in host.strip("[]:") and ":" not in host:
         raise BlockedURL("Local and private network hosts are refused.")
-    try:
-        literal = ipaddress.ip_address(host.strip("[]"))
-    except ValueError:
-        literal = None
-    if literal is not None and (not literal.is_global or literal.is_multicast):
-        raise BlockedURL("Private and local network addresses are refused.")
-    try:
-        infos = resolve(host, port, proto=socket.IPPROTO_TCP)
-    except socket.gaierror as e:
-        raise FetchError(f"Could not resolve {host}.") from e
-    for info in infos:
-        ip = ipaddress.ip_address(info[4][0].split("%")[0])
-        if not ip.is_global or ip.is_multicast:
-            raise BlockedURL("This host points to a private or local network address; it is refused.")
+    resolve_public(host, port, resolve)
     return url
 
 
@@ -102,9 +172,12 @@ class Fetcher:
         self._last: dict[str, float] = {}
         self._lock = threading.Lock()
         self._robots: dict[str, urllib.robotparser.RobotFileParser | None] = {}
+        self._host_sems: dict[str, threading.Semaphore] = {}
         self.resolve = resolve
         self.sleep = sleep
-        self.client = httpx.Client(timeout=cfg.timeout_seconds, follow_redirects=False, transport=transport,
+        # Real network access always goes through the pinned transport; tests pass a mock transport.
+        self.client = httpx.Client(timeout=cfg.timeout_seconds, follow_redirects=False, trust_env=False,
+                                   transport=transport or pinned_transport(resolve),
                                    headers={"User-Agent": cfg.user_agent, "Accept-Encoding": "gzip, deflate"})
 
     def _pace(self, host: str) -> None:
@@ -146,8 +219,11 @@ class Fetcher:
         current = url
         for _ in range(6):
             check_url(current, self.resolve)
-            self._pace(urlparse(current).hostname or "")
-            with self.sem:
+            host = urlparse(current).hostname or ""
+            self._pace(host)
+            with self._lock:
+                host_sem = self._host_sems.setdefault(host, threading.Semaphore(max(1, getattr(self.cfg, "per_host_concurrency", 2))))
+            with self.sem, host_sem:
                 try:
                     with self.client.stream("GET", current, headers=headers) as r:
                         if r.status_code in (301, 302, 303, 307, 308) and "location" in r.headers:

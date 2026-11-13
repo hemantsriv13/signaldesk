@@ -1,15 +1,18 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from "react"
 import {
-  BookmarkSimpleIcon, BookOpenIcon, BriefcaseIcon, FlaskIcon, GearIcon, MoonIcon, QuestionIcon, RobotIcon, RssIcon, SunIcon,
+  BookmarkSimpleIcon, BookOpenIcon, BriefcaseIcon, FlaskIcon, GearIcon, LinkSimpleIcon, MagnifyingGlassIcon, MoonIcon, QuestionIcon, RobotIcon, RssIcon, SunIcon,
 } from "@/components/icons"
 import { Button } from "@/components/ui/button"
 import { Sidebar, SidebarContent, SidebarFooter, SidebarGroup, SidebarHeader, SidebarItem } from "@/components/ui/sidebar"
 import { StatusIndicator } from "@/components/ui/status-indicator"
-import { useApi, type Status } from "@/lib/api"
+import { SignIn } from "@/components/sign-in"
+import { loadAuth, useApi, type AuthState, type Status } from "@/lib/api"
 import { go, useRoute } from "@/lib/router"
 import Cases from "@/pages/Cases"
+import Funded from "@/pages/Funded"
 import How from "@/pages/How"
 import Jobs from "@/pages/Jobs"
+import Outreach from "@/pages/Outreach"
 import Reading from "@/pages/Reading"
 import Runs from "@/pages/Runs"
 import Saved from "@/pages/Saved"
@@ -20,6 +23,8 @@ import Today from "@/pages/Today"
 const NAV: { page: string; label: string; icon: ReactNode }[] = [
   { page: "today", label: "Today", icon: <SunIcon /> },
   { page: "jobs", label: "Jobs", icon: <BriefcaseIcon /> },
+  { page: "funded", label: "Funded startups", icon: <MagnifyingGlassIcon /> },
+  { page: "outreach", label: "Outreach", icon: <LinkSimpleIcon /> },
   { page: "reading", label: "Reading", icon: <BookOpenIcon /> },
   { page: "cases", label: "Case studies", icon: <FlaskIcon /> },
   { page: "saved", label: "Saved", icon: <BookmarkSimpleIcon /> },
@@ -30,7 +35,7 @@ const NAV: { page: string; label: string; icon: ReactNode }[] = [
 ]
 
 const PAGES: Record<string, () => ReactNode> = {
-  today: () => <Today />, jobs: () => <Jobs />, reading: () => <Reading />, cases: () => <Cases />, saved: () => <Saved />,
+  today: () => <Today />, jobs: () => <Jobs />, funded: () => <Funded />, outreach: () => <Outreach />, reading: () => <Reading />, cases: () => <Cases />, saved: () => <Saved />,
   runs: () => <Runs />, sources: () => <Sources />, settings: () => <Settings />, how: () => <How />,
 }
 
@@ -51,11 +56,31 @@ function useTheme() {
   return () => {
     const next = document.documentElement.classList.contains("dark") ? "light" : "dark"
     try { localStorage.setItem("theme", next) } catch { /* the choice just won't persist */ }
+    const root = document.documentElement
+    root.classList.add("theme-switching")
+    requestAnimationFrame(() => requestAnimationFrame(() => root.classList.remove("theme-switching")))
     setTheme(next)
   }
 }
 
+/** Checks sign-in first: on the HTTPS entry point nothing else loads until you sign in. */
 export default function App() {
+  const [auth, setAuth] = useState<AuthState | null>(null)
+  const [failed, setFailed] = useState<string | null>(null)
+  const check = () => loadAuth().then(setAuth).catch((e) => setFailed(e instanceof Error ? e.message : String(e)))
+  useEffect(() => {
+    check()
+    const out = () => check()
+    window.addEventListener("signaldesk:signed-out", out)
+    return () => window.removeEventListener("signaldesk:signed-out", out)
+  }, [])
+  if (failed && !auth) return <p className="p-6 text-sm" role="alert">SignalDesk's server is not answering ({failed}). Reload when it is running.</p>
+  if (!auth) return <p className="p-6 text-sm text-muted-foreground" role="status">Loading</p>
+  if (auth.required && !auth.authenticated) return <SignIn passwordSet={auth.passwordSet} onDone={check} />
+  return <Shell />
+}
+
+function Shell() {
   const route = useRoute()
   const [busy, setBusy] = useState(false)
   const { data: status, error, reload } = useApi<Status>("/api/status", busy ? 3000 : 15000)

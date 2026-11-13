@@ -1,3 +1,4 @@
+import { DiscoverySources } from "@/components/discovery-sources"
 import { SourceDiscovery } from "@/components/source-discovery"
 import { useState } from "react"
 import { ExternalLink, PageHeader, Pill, Section } from "@/components/common"
@@ -43,6 +44,7 @@ export default function Sources() {
     <div className="flex flex-col gap-8 p-4 sm:p-6">
       <PageHeader title="Sources" line="Employer job boards and reading feeds. Turning one off keeps what it already collected." />
       <SourceDiscovery onChoose={(board, url) => setEditCo({ name: "", ats: board.ats, ats_id: board.ats_id, careers_url: url, enabled: 0, verification: "Discovered from careers page; employer identity needs review" })} />
+      <DiscoverySources />
       <Section title={`Employers (${data?.companies.filter((c) => c.enabled).length ?? 0} on)`}
         aside={<Button size="sm" variant="outline" onClick={() => setEditCo({ ats: "greenhouse", enabled: 1 })}><PlusIcon className="size-4" />Add employer</Button>}>
         <p className="max-w-[80ch] text-sm text-muted-foreground">Jobs come from each employer's public Greenhouse, Lever or Ashby board. Employers marked "manual" are not fetched: check their careers page yourself and add jobs by hand. LinkedIn is not scraped.</p>

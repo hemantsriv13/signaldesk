@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>SignalDesk</title>
+  <link rel="stylesheet" href="panel.css" />
+</head>
+<body>
+  <header class="top">
+    <strong>SignalDesk</strong>
+    <nav aria-label="Panel views">
+      <button type="button" data-view="compare" aria-current="page">Compare</button>
+      <button type="button" data-view="searches">Searches</button>
+      <button type="button" data-view="connect">Connection</button>
+    </nav>
+  </header>
+
+  <div id="banner" class="banner" role="alert" hidden>
+    <span id="banner-text"></span>
+    <button type="button" id="reconnect">Reconnect</button>
+  </div>
+
+  <main>
+    <section id="view-connect" hidden>
+      <h1>Connect to SignalDesk</h1>
+      <p class="muted">In SignalDesk, open Profile and settings → Security → Create pairing token. The token only allows importing and comparing jobs.</p>
+      <label for="endpoint">SignalDesk address</label>
+      <input id="endpoint" type="url" placeholder="http://127.0.0.1:8780 or https://192.168.1.10:8443" autocomplete="off" />
+      <label for="token">Pairing token</label>
+      <input id="token" type="password" autocomplete="off" />
+      <button type="button" id="connect" class="primary">Connect</button>
+      <button type="button" id="disconnect">Disconnect and forget this token</button>
+      <p id="connect-status" class="muted" role="status"></p>
+    </section>
+
+    <section id="view-compare" hidden>
+      <label for="label">Search you used</label>
+      <input id="label" list="labels" placeholder="Founder's Office Bengaluru" autocomplete="off" />
+      <datalist id="labels"></datalist>
+      <label for="paste">Paste job cards or a full description (Ctrl+V)</label>
+      <textarea id="paste" rows="7" placeholder="Put a line with --- between listings to set the boundaries yourself."></textarea>
+      <button type="button" id="parse">Read listings</button>
+      <p id="parse-notes" class="muted" role="status"></p>
+      <ol id="preview" class="preview"></ol>
+      <button type="button" id="save" class="primary" hidden>Save and compare</button>
+      <h2 id="results-title" hidden>Results</h2>
+      <ol id="results" class="results"></ol>
+    </section>
+
+    <section id="view-searches" hidden>
+      <h1>Which searches work for me?</h1>
+      <p id="metrics-note" class="muted"></p>
+      <div id="metrics"></div>
+    </section>
+  </main>
+  <script src="panel.js"></script>
+</body>
+</html>

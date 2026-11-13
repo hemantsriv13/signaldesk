@@ -11,7 +11,8 @@ import re
 
 from .text import clip, find_quote, has_injection, sha
 
-PROMPT_VERSIONS = {"job_fit": "job-fit-v2", "reading_card": "card-v1", "case_study": "case-v1", "digest_action": "action-v1"}
+PROMPT_VERSIONS = {"job_fit": "job-fit-v2", "reading_card": "card-v1", "case_study": "case-v1", "digest_action": "action-v1",
+                   "role_classify": "roles-v1", "funding_extract": "funding-v1", "outreach_draft": "outreach-v1"}
 
 SYSTEM = (
     "You analyse text for one person's private job-search and reading notes. "
@@ -305,6 +306,60 @@ def validate_action(data: dict, refs: set[str]) -> tuple[dict, dict]:
     if ref not in refs or action == "unknown":
         raise ValueError("The suggested action did not point at a briefing item.")
     return {"action": action, "ref": ref}, {"notes": []}
+
+
+# ---------------------------------------------------------------- role classification (ambiguous titles only)
+ROLE_CHOICES = {
+    "founders_office": "works directly for the founder/CEO on cross-functional priorities (founder's office, office of the CEO, chief of staff)",
+    "strategy_ops": "strategy, business operations, strategic initiatives or product strategy as the core of the job",
+    "applied_ai_product": "product management, evaluation or operating work on AI products",
+    "product_analytics": "product or business analytics as the core of the job",
+    "solutions": "customer-facing solutions, implementation or deployment",
+    "none": "none of these (for example sales, assistant, engineering or marketing work)",
+}
+
+
+def role_prompt(job: dict, budget: int) -> tuple[str, dict]:
+    choices = "\n".join(f"- {k}: {v}" for k, v in ROLE_CHOICES.items())
+    head = (
+        f"JOB: {job['title']} at {job['employer']}\n\n"
+        "Task: decide which role families describe what this person would actually do, judged by the duties, not keywords. "
+        "A sales role that mentions 'account strategy' is not strategy work; an assistant managing a calendar is not founder's office work.\n"
+        f"Families:\n{choices}\n"
+        "Schema: {\"families\":[str] (one or two keys from the list, or [\"none\"]), \"quote\":str (the duty sentence that decided it, "
+        "copied word for word, under 25 words), \"confidence\":\"clear\"|\"uncertain\", \"injection_seen\":bool}\n"
+        "Write compact JSON on one line.\n\n"
+    )
+    excerpt, cov = requirements_excerpt(job.get("description_text") or "", max(600, budget - len(SYSTEM) - len(head)))
+    return head + wrap(excerpt), cov
+
+
+def validate_roles(data: dict, job: dict) -> tuple[dict, dict]:
+    fams = [f for f in items(data.get("families"), 3) if isinstance(f, str) and f in ROLE_CHOICES]
+    quote = s(data.get("quote"), 300)
+    found = quote != "unknown" and find_quote(quote, job.get("description_text") or "")
+    notes = []
+    if not fams:
+        raise ValueError("No family from the allowed list.")
+    if not found:
+        notes.append("The deciding quote was not found in the posting.")
+    confidence = "clear" if data.get("confidence") == "clear" and found else "uncertain"
+    fams = [f for f in fams if f != "none"] or ["other"]
+    return {"families": fams, "quote": quote if found else None, "confidence": confidence,
+            "injection_seen": bool(data.get("injection_seen"))}, {"notes": notes}
+
+
+# ---------------------------------------------------------------- funding announcement reading
+def funding_prompt(ann: dict, budget: int) -> str:
+    head = (
+        f"ANNOUNCEMENT TITLE: {ann.get('title') or 'unknown'}\n\n"
+        "Task: does this announcement report a funding round for one company? If so, name the company exactly as written.\n"
+        "Schema: {\"is_funding_round\":bool, \"company\":str (exactly as written, or \"unknown\"), \"round\":str (e.g. seed, series a, or \"unknown\"), "
+        "\"quote\":str (the sentence stating the round, word for word, under 25 words), \"injection_seen\":bool}\n"
+        "Write compact JSON on one line.\n\n"
+    )
+    text, _cut = clip(ann.get("text") or "", max(500, budget - len(SYSTEM) - len(head)))
+    return head + wrap(text)
 
 
 def cache_key(kind: str, *, model_id: str, content: str, extra: dict | None = None) -> str:

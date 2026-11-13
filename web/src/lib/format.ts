@@ -28,8 +28,21 @@ export function ago(iso: string | null | undefined): string {
 export const plural = (n: number, one: string, many = `${one}s`) => `${n.toLocaleString("en-IN")} ${n === 1 ? one : many}`
 
 export const AGENT_PAGE: Record<string, string> = {
+  funding_scout: "funded",
   job_scout: "jobs",
   reading_scout: "reading",
   case_analyst: "cases",
+  contact_scout: "outreach",
   digest_editor: "saved",
+  source_refresh: "sources",
+}
+
+const ROUNDS: Record<string, string> = { pre_seed: "Pre-seed", seed: "Seed", angel: "Angel", bridge: "Bridge", growth: "Growth", venture_debt: "Venture debt", debt: "Debt", unknown: "Round not stated" }
+export function ROUND_LABEL(r: string): string {
+  const m = r.match(/^(pre_)?series_([a-h])$/)
+  return m ? `${m[1] ? "Pre-" : ""}Series ${m[2].toUpperCase()}` : ROUNDS[r] ?? r
+}
+
+export const SOURCE_LABEL: Record<string, string> = {
+  greenhouse: "Greenhouse", lever: "Lever", ashby: "Ashby", wellfound: "Wellfound", yc_jobs: "YC jobs", manual: "Added by you",
 }
