@@ -23,7 +23,7 @@ export default function Reading() {
   const [basis, setBasis] = useState("")
   const [analysed, setAnalysed] = useState("")
   const { data, error, reload } = useApi<{ articles: ArticleRow[]; sources: { id: number; name: string }[] }>(
-    `/api/articles?${new URLSearchParams({ q, source, basis, analysed })}`)
+    `/api/articles?${new URLSearchParams(Object.entries({ q, source, basis, analysed }).filter(([, v]) => v))}`)
   const { status } = useStatus()
   useEffect(() => { reload() }, [status?.counts.cards, status?.counts.articles]) // eslint-disable-line react-hooks/exhaustive-deps
 

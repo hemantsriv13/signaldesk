@@ -9,7 +9,7 @@ import { SignIn } from "@/components/sign-in"
 import { loadAuth, useApi, type AuthState, type Status } from "@/lib/api"
 import { go, useRoute } from "@/lib/router"
 import Cases from "@/pages/Cases"
-import Funded from "@/pages/Funded"
+import Hiring from "@/pages/Hiring"
 import How from "@/pages/How"
 import Jobs from "@/pages/Jobs"
 import Outreach from "@/pages/Outreach"
@@ -23,7 +23,7 @@ import Today from "@/pages/Today"
 const NAV: { page: string; label: string; icon: ReactNode }[] = [
   { page: "today", label: "Today", icon: <SunIcon /> },
   { page: "jobs", label: "Jobs", icon: <BriefcaseIcon /> },
-  { page: "funded", label: "Funded startups", icon: <MagnifyingGlassIcon /> },
+  { page: "hiring", label: "Hiring companies", icon: <MagnifyingGlassIcon /> },
   { page: "outreach", label: "Outreach", icon: <LinkSimpleIcon /> },
   { page: "reading", label: "Reading", icon: <BookOpenIcon /> },
   { page: "cases", label: "Case studies", icon: <FlaskIcon /> },
@@ -35,7 +35,7 @@ const NAV: { page: string; label: string; icon: ReactNode }[] = [
 ]
 
 const PAGES: Record<string, () => ReactNode> = {
-  today: () => <Today />, jobs: () => <Jobs />, funded: () => <Funded />, outreach: () => <Outreach />, reading: () => <Reading />, cases: () => <Cases />, saved: () => <Saved />,
+  today: () => <Today />, jobs: () => <Jobs />, hiring: () => <Hiring />, funded: () => <Hiring />, outreach: () => <Outreach />, reading: () => <Reading />, cases: () => <Cases />, saved: () => <Saved />,
   runs: () => <Runs />, sources: () => <Sources />, settings: () => <Settings />, how: () => <How />,
 }
 
@@ -87,7 +87,7 @@ function Shell() {
   useEffect(() => setBusy(!!status && (status.runs.length > 0 || status.queue.queued + status.queue.running > 0)), [status])
   const toggleTheme = useTheme()
   const page = PAGES[route.page] ? route.page : "today"
-  const label = NAV.find((n) => n.page === page)?.label ?? "Today"
+  const label = NAV.find((n) => n.page === (page === "funded" ? "hiring" : page))?.label ?? "Today"
   useEffect(() => { document.title = `${label} · SignalDesk` }, [label])
 
   const model = status?.model
@@ -106,7 +106,7 @@ function Shell() {
             <nav aria-label="Main">
               <SidebarGroup className="flex flex-row flex-wrap gap-0.5 lg:flex-col">
                 {NAV.map((n) => (
-                  <SidebarItem key={n.page} icon={n.icon} active={page === n.page} onClick={() => go(n.page)} className="w-auto lg:w-full">
+                  <SidebarItem key={n.page} icon={n.icon} active={page === n.page || (n.page === "hiring" && page === "funded")} onClick={() => go(n.page)} className="w-auto lg:w-full">
                     {n.label}
                   </SidebarItem>
                 ))}

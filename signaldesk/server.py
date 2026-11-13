@@ -18,7 +18,7 @@ from pydantic import BaseModel
 
 import hmac
 
-from . import auth, collect, contacts, funding, jobrules, registry, sweep
+from . import auth, collect, contacts, funding, hiring, jobrules, registry, sweep
 from . import lan as lan_mod
 from . import panel as panel_api
 from .cv import MAX_BYTES, preview_cv
@@ -546,8 +546,12 @@ def create_app(engine: Engine, scheduler: Scheduler | None = None) -> FastAPI:
         return rows
 
     @app.get("/api/articles")
-    def articles(q: str = "", source: int | None = None, basis: str = "", analysed: str = ""):
+    def articles(q: str = "", source: str = "", basis: str = "", analysed: str = ""):
+        # "All sources" arrives as source= (blank); a blank filter means no filter, not a bad number.
         where, args = "1=1", []
+        source = source.strip()
+        if source and not source.isdigit():
+            raise HTTPException(400, "Source must be a source id.")
         if source:
             where += " AND a.source_id = ?"
             args.append(source)
@@ -781,6 +785,49 @@ def create_app(engine: Engine, scheduler: Scheduler | None = None) -> FastAPI:
         merged = collect.verify_unverified(db)
         return {**res, "confirmed_now": merged}
 
+    # ------------------------------------------------------------ hiring companies
+    def hiring_refresh_state() -> dict:
+        runs = {r["agent"]: r for r in db.all(
+            "SELECT agent, status, started_at, finished_at FROM runs WHERE id IN (SELECT MAX(id) FROM runs WHERE agent IN ('funding_scout', 'job_scout') GROUP BY agent)")}
+        sources = [{"key": x["key"], "name": x["name"], "mode": x["mode"], "modeLabel": x["modeLabel"], "error": x["status"].get("last_error"),
+                    "last_success_at": x["status"].get("last_success_at")} for x in registry.load(db, engine.cfg.home) if x.get("group") in ("funding", "jobs")]
+        return {"running": any(r["status"] not in ("done", "done_with_errors", "failed", "cancelled") for r in runs.values()),
+                "funding_scout": runs.get("funding_scout"), "job_scout": runs.get("job_scout"), "sources": sources}
+
+    @app.get("/api/hiring")
+    def hiring_list(view: str = "hiring", families: str = "", backing: str = "all", q: str = ""):
+        if view not in ("hiring", "all"):
+            raise HTTPException(400, "View must be hiring or all")
+        res = hiring.companies(db, engine.cfg.home, families=[f for f in families.split(",") if f], backing=backing or "all", q=q, view=view)
+        return {**res, "refresh": hiring_refresh_state()}
+
+    @app.get("/api/hiring/company")
+    def hiring_company(key: str):
+        c = hiring.company(db, engine.cfg.home, key)
+        if not c:
+            raise HTTPException(404, "Company not found")
+        return c
+
+    @app.post("/api/hiring/company/refresh")
+    def hiring_company_refresh(key: str):
+        """Recheck one company now. A failure is recorded on the company; its saved openings are kept."""
+        c = hiring.company(db, engine.cfg.home, key)
+        if not c:
+            raise HTTPException(404, "Company not found")
+        if c["company_id"]:
+            company = db.one("SELECT * FROM companies WHERE id = ?", (c["company_id"],))
+            if company["ats"] == "manual":
+                raise HTTPException(400, "This employer has no job board SignalDesk can read; its listings were added by hand or imported.")
+            res = collect.collect_company(db, engine.fetcher, company, engine.profiles.prefs())
+            result = {"ok": not res.get("error"), "error": res.get("error"), "counts": {k: res.get(k) for k in ("fetched", "new", "changed", "closed")}}
+        elif c["startup_id"]:
+            db.update("startups", c["startup_id"], {"careers_checked_at": None})
+            r = funding.resolve_careers(db, engine.fetcher, limit=50)
+            result = {"ok": not r["failed"], "error": "The company's careers page could not be reached." if r["failed"] else None, "counts": r}
+        else:
+            raise HTTPException(400, "These listings came from a listing site, not the employer's own board, so there is nothing to recheck here.")
+        return {**result, "company": hiring.company(db, engine.cfg.home, key)}
+
     # ------------------------------------------------------------ funded startups
     @app.get("/api/funding")
     def funded(window: str = "180", india: str = "all"):
@@ -990,6 +1037,8 @@ def create_app(engine: Engine, scheduler: Scheduler | None = None) -> FastAPI:
             f = WEB / path
             if path and f.is_file() and WEB in f.resolve().parents:
                 return FileResponse(f)
-            return FileResponse(WEB / "index.html")
+            # The page names this build's hashed assets, so the browser must recheck it on every load;
+            # otherwise a cached copy keeps loading the previous build's CSS and scripts after an update.
+            return FileResponse(WEB / "index.html", headers={"Cache-Control": "no-cache"})
 
     return app

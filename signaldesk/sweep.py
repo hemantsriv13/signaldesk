@@ -28,6 +28,7 @@ SCOPES = {
     "full": ("funding_scout", "job_scout", "reading_scout", "case_analyst", "contact_scout", "digest_editor"),
     "jobs": ("job_scout", "contact_scout"),
     "funding": ("funding_scout",),
+    "hiring": ("funding_scout", "job_scout"),   # discover companies and their boards, then collect every board
     "contacts": ("contact_scout",),
     "reading": ("reading_scout", "case_analyst"),
 }

@@ -81,10 +81,10 @@ function Answers() {
         )}
       </Section>
       <div className="flex flex-col gap-8">
-        <Section title="Recently funded, India-linked" aside={<a className="text-sm text-(--primary-text) underline underline-offset-2" href={href("funded", null, { window: "90" })}>All</a>}>
+        <Section title="Recently funded, India-linked" aside={<a className="text-sm text-(--primary-text) underline underline-offset-2" href={href("hiring", null, { backing: "backed" })}>All</a>}>
           {funded && !funded.startups.length ? <p className="text-sm text-muted-foreground">No dated rounds in the last 90 days yet. Set up announcement sources under Sources.</p> : (
             <ul className="flex flex-col gap-2 text-sm">{funded?.startups.slice(0, 4).map((s) => (
-              <li key={s.id}><a href={href("funded", s.id, { window: "90" })} className="font-medium underline-offset-2 hover:underline">{s.name}</a>
+              <li key={s.id}><a href={href("hiring", null, { co: `s${s.id}` })} className="font-medium underline-offset-2 hover:underline">{s.name}</a>
                 <span className="text-muted-foreground"> · {s.latest ? `${s.latest.investor ?? "investor not named"}, ${day(s.latest.announced_on)}` : ""} · {s.opening_state}</span></li>))}</ul>
           )}
         </Section>
@@ -156,7 +156,7 @@ export default function Today() {
       <PageHeader title="Today"
         action={<>
           <NativeSelect aria-label="What to refresh" value={scope} onChange={(e) => setScope(e.target.value)} className="h-9 w-48 text-sm" disabled={running}>
-            <option value="full">Everything</option><option value="jobs">Jobs and contacts</option><option value="funding">Funded startups</option>
+            <option value="full">Everything</option><option value="jobs">Jobs and contacts</option><option value="funding">Funded startups</option><option value="hiring">Hiring companies</option>
             <option value="contacts">Contacts only</option><option value="reading">Reading</option>
             {sources?.sources.filter((s) => s.mode === "automatic" || s.mode === "unavailable").map((s) => <option key={s.key} value={`source:${s.key}`}>Only {s.name}</option>)}
           </NativeSelect>

@@ -247,7 +247,8 @@ is "Awaiting your validation" until the commands in that guide pass on this lapt
 | Feature | Status | Needs |
 |---|---|---|
 | Wellfound import, YC jobs, cross-source merge | Implemented, not run | Wellfound: your saved listings. YC: nothing |
-| Funded startups (YC watchlist, WestBridge, Accel, Peak XV, Lightspeed) | Implemented, not run | Investor announcement page addresses (none confirmed yet) |
+| Hiring companies (replaces Funded startups): employers with eligible Bengaluru or India-remote openings, grouped from the same records as Jobs; investor evidence optional | Tested on a copy of real data: 17 companies, 287 openings | Nothing; **Refresh hiring** rechecks boards |
+| Portfolio discovery: YC India (`/companies/location/india`; robots.txt disallows the filtered directory and the API), WestBridge portfolio | Tested live on a copy: 50 YC + 12 WestBridge companies | Accel, Peak XV, Lightspeed and WestBridge announcements still need page addresses |
 | Role families from duties, location groups, pay bands | Implemented, not run | Your profile facts and "not claimed" list |
 | Contacts and drafts from public pages | Implemented, not run | Nothing; LinkedIn is not integrated |
 | Automatic sending | Not available | An authorised messaging integration (none exists for this project) |

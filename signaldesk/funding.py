@@ -30,7 +30,7 @@ WINDOWS = (30, 90, 180)
 DEFAULT_WINDOW = 180
 SAME_ROUND_DAYS = 45
 MAX_ARTICLES_PER_SOURCE = 12
-MAX_CAREERS_CHECKS = 8
+MAX_CAREERS_CHECKS = 15
 RECHECK_DAYS = 7
 
 FUNDING_HINT = re.compile(r"\b(raises?|raised|funding|series [a-h]\b|pre-?seed|seed round|seed funding|investment in|invests? in|"
@@ -223,12 +223,13 @@ def collect_portfolio(db: DB, fetcher: Fetcher, src: dict, limit_details: int = 
         upsert_startup(db, c["name"], domain=dom, domain_evidence=f"Linked from {src['url']}" if dom else None,
                        watch_source=src["key"], watch_url=c["detail_url"] or src["url"])
         counts["new"] += not before
+    link_known_employers(db)
     # Detail pages give the website for portfolios that link inside the site (YC). Bounded per sweep.
-    for s in db.all("SELECT id, watch_url FROM startups WHERE watch_source = ? AND domain IS NULL AND watch_url LIKE 'http%' "
+    for s in db.all("SELECT id, name, watch_url FROM startups WHERE watch_source = ? AND domain IS NULL AND watch_url LIKE 'http%' "
                     "AND (last_checked_at IS NULL OR last_checked_at < ?) ORDER BY id LIMIT ?",
                     (src["key"], (date.today() - timedelta(days=RECHECK_DAYS)).isoformat(), limit_details)):
         try:
-            site = web.company_website(fetcher, s["watch_url"])
+            site = web.company_website(fetcher, s["watch_url"], s["name"])
         except FetchError:
             counts["failed"] += 1
             continue
@@ -238,6 +239,19 @@ def collect_portfolio(db: DB, fetcher: Fetcher, src: dict, limit_details: int = 
             counts["websites_found"] += 1
         db.update("startups", s["id"], upd)
     return counts
+
+
+def link_known_employers(db: DB) -> int:
+    """Tie a discovered startup to an employer SignalDesk already tracks under the same name, so its
+    openings and its backing show together. Never changes an existing tie."""
+    known = {norm(c["name"]): c["id"] for c in db.all("SELECT id, name FROM companies")}
+    n = 0
+    for s in db.all("SELECT id, name_key FROM startups WHERE company_id IS NULL"):
+        if s["name_key"] in known:
+            db.update("startups", s["id"], {"company_id": known[s["name_key"]], "careers_status": "board_found",
+                                            "careers_note": "Already tracked as an employer in Sources."})
+            n += 1
+    return n
 
 
 def resolve_careers(db: DB, fetcher: Fetcher, limit: int = MAX_CAREERS_CHECKS) -> dict:

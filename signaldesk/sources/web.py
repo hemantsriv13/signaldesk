@@ -208,37 +208,53 @@ def article(fetcher: Fetcher, url: str) -> dict:
 
 
 # ---------------------------------------------------------------- portfolio pages
+PORTFOLIO_NOT_COMPANY = {"location", "industry", "industries", "batch", "founders", "black-founders", "hispanic-latino-founders",
+                         "women-founders", "top-companies", "breakthrough", "nonprofits", "all", "search"}
+
+
 def portfolio(fetcher: Fetcher, url: str) -> list[dict]:
     """Companies listed on a portfolio page: {name, website or None, detail_url or None}.
     Listing on a portfolio page says nothing about when a company was funded."""
     final, page, _raw = read_page(fetcher, url)
-    host = urlsplit(final).hostname
-    out, seen = [], set()
+    host = (urlsplit(final).hostname or "").removeprefix("www.")
+    inside, outside, seen = [], [], set()
     for link in page.links:
-        href = urljoin(final, link["href"]).split("#")[0]
+        href = urljoin(final, link["href"]).split("#")[0].split("?")[0]
         name = re.sub(r"\s+", " ", (link["text"] or link["aria"])).strip()
-        h = urlsplit(href).hostname or ""
-        if not name or len(name) > 80 or href in seen:
-            continue
-        if h == host and re.search(r"/companies/[a-z0-9-]+/?$", href):
+        h = (urlsplit(href).hostname or "").removeprefix("www.")
+        m = re.search(r"/(?:companies|portfolio)/([a-z0-9-]+)/?$", href)
+        if h == host and m and m.group(1) not in PORTFOLIO_NOT_COMPANY:
+            if href in seen:
+                continue
             seen.add(href)
-            out.append({"name": name.split(" ")[0] if len(name) > 60 else name, "website": None, "detail_url": href})
-        elif h and h != host and not SOCIAL.search(h):
+            # Card links often carry the one-liner too; fall back to the page's own slug for a name.
+            name = name if name and len(name) <= 60 else m.group(1).replace("-", " ").title()
+            inside.append({"name": name, "website": None, "detail_url": href})
+        elif name and len(name) <= 80 and h and h != host and not SOCIAL.search(h) and href not in seen:
             seen.add(href)
-            out.append({"name": name, "website": f"https://{h.removeprefix('www.')}", "detail_url": None})
+            outside.append({"name": name, "website": f"https://{h}", "detail_url": None})
+    # A page with its own company pages lists companies there; its outside links are navigation, logins and press.
+    out = inside or outside
     if not out:
         raise FetchError("The page answered but listed no recognisable companies; its layout may have changed or it needs scripts.")
     return out
 
 
-def company_website(fetcher: Fetcher, detail_url: str) -> str | None:
-    """The website a portfolio detail page links as the company's own. None when it does not say."""
+def company_website(fetcher: Fetcher, detail_url: str, name: str = "") -> str | None:
+    """The website a portfolio detail page links as the company's own: a link labelled as the website,
+    or (when the company's name is known) one labelled with that name or on a domain named after it.
+    None when the page does not say."""
     final, page, _raw = read_page(fetcher, detail_url)
     host = urlsplit(final).hostname
+    key = re.sub(r"[^a-z0-9]", "", name.lower())
     for link in page.links:
         href = urljoin(final, link["href"])
         h = urlsplit(href).hostname or ""
-        label = (link["text"] + " " + link["aria"]).lower()
-        if h and h != host and not SOCIAL.search(h) and (re.search(r"website|visit|homepage", label) or label.strip() in (h, h.removeprefix("www."))):
-            return f"https://{h.removeprefix('www.')}"
+        if not h or h == host or SOCIAL.search(h):
+            continue
+        label = re.sub(r"\s+", " ", link["text"] + " " + link["aria"]).strip().lower()
+        bare = h.removeprefix("www.")
+        named = len(key) >= 3 and (re.sub(r"[^a-z0-9]", "", label) == key or bare.split(".")[0].replace("-", "") == key)
+        if re.search(r"website|visit|homepage", label) or label in (h, bare) or named:
+            return f"https://{bare}"
     return None

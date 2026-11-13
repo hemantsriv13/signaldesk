@@ -89,3 +89,32 @@ def test_quiet_day_digest_is_short_and_says_so(engine, fake_model):
 def test_usage_reports_no_invented_numbers(engine):
     u = client(engine).get("/api/usage").json()
     assert u["all"]["modelRequests"] == 0 and u["all"]["tokensIn"] is None and u["paidApis"] == "disabled"
+
+
+def test_reading_first_load_with_blank_filters(engine):
+    """Regression: Reading's first load sends every filter blank ("All sources", "Any", "Any").
+    `source=` used to fail integer parsing with HTTP 422."""
+    db = engine.db
+    sid = db.insert("reading_sources", {"name": "Blog", "feed_url": "https://blog.example.com/feed", "kind": "substack", "enabled": 1, "created_at": "x"})
+    other = db.insert("reading_sources", {"name": "Other", "feed_url": "https://other.example.com/feed", "kind": "substack", "enabled": 1, "created_at": "x"})
+    for i, (src, basis) in enumerate([(sid, "full"), (sid, "excerpt"), (other, "full")]):
+        db.insert("articles", {"url": f"https://e.com/r{i}", "title": f"r{i}", "source_id": src, "retrieved_at": now_iso(),
+                               "content_basis": basis, "content_hash": f"r{i}", "dedupe_key": f"r{i}"})
+    c = client(engine)
+    r = c.get("/api/articles?q=&source=&basis=&analysed=")          # the exact first-load request
+    assert r.status_code == 200, r.text
+    assert len(r.json()["articles"]) == 3 and {s["name"] for s in r.json()["sources"]} == {"Blog", "Other"}
+    assert c.get("/api/articles").status_code == 200                 # the page now omits blank filters
+    assert len(c.get(f"/api/articles?source={sid}").json()["articles"]) == 2
+    assert len(c.get("/api/articles?basis=full").json()["articles"]) == 2
+    assert c.get("/api/articles?source=abc").status_code == 400
+
+
+def test_app_page_is_rechecked_so_updates_show(engine):
+    """index.html names the current build's hashed assets; a cached copy would keep loading an old build."""
+    from signaldesk import server
+    if not (server.WEB / "index.html").exists():
+        import pytest
+        pytest.skip("web app not built")
+    r = client(engine).get("/reading")
+    assert r.status_code == 200 and r.headers["cache-control"] == "no-cache"

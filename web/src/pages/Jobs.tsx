@@ -399,7 +399,7 @@ function FundingSection({ f }: { f: JobDetail["funding"] }) {
   if (!f) return null
   const e = f.latest
   return (
-    <Section title="Funding" aside={<a className="text-sm text-(--primary-text) underline underline-offset-2" href={href("funded", f.startup_id)}>Startup details</a>}>
+    <Section title="Funding" aside={<a className="text-sm text-(--primary-text) underline underline-offset-2" href={href("hiring", null, { co: `s${f.startup_id}` })}>Company details</a>}>
       {e ? (
         <p className="text-sm">{e.investor ? `${e.investor} announced` : "Announced"} a {ROUND_LABEL(e.round).toLowerCase()} round{e.amount_text ? ` of ${e.amount_text}` : ""} on {day(e.announced_on)}
           {f.days_since !== null ? ` (${f.days_since} days ago)` : ""}. <ExternalLink url={e.announcement_url}>Announcement</ExternalLink></p>
