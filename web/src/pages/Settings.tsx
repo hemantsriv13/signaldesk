@@ -1,4 +1,5 @@
 import { DeliverySettings } from "@/components/delivery-settings"
+import { SecuritySettings } from "@/components/security-settings"
 import { useEffect, useState } from "react"
 import { useStatus } from "@/App"
 import { CvImport } from "@/components/cv-import"
@@ -19,7 +20,7 @@ interface Prefs { locations: string[]; role_families: string[]; ctc_threshold_la
 interface ProfileResp { profile: Profile; version: string; preferences: Prefs; families: Record<string, string>; locations: Record<string, string> }
 interface SettingsResp {
   model: Record<string, string | number>; limits: Record<string, number>; fetch: Record<string, string | number>; dataDir: string; configFile: string
-  schedule: { enabled: boolean; time: string; next_run: string | null; last_result: string | null; last_slot: string | null }
+  schedule: { enabled: boolean; time: string; times: string[]; next_run: string | null; last_result: string | null; last_slot: string | null }
 }
 interface Suggestion { id: string; text: string }
 
@@ -98,6 +99,8 @@ export default function Settings() {
 
       {settings && <ScheduleSection settings={settings} onSaved={reloadSettings} />}
 
+      <SecuritySettings />
+
       {settings && (
         <Section title="Local model">
           <Facts rows={[
@@ -107,6 +110,8 @@ export default function Settings() {
             ["Context window", `${settings.model.context_tokens} tokens (a token is about 4 characters), up to ${settings.model.max_output_tokens} for the reply`],
             ["Text per request", `about ${settings.model.prompt_char_budget} characters`],
             ["Attempts per item", String(settings.model.max_attempts)],
+            ["Requests at once", String(settings.model.concurrency)],
+            ["Larger model for unclear cases", settings.model.escalation_model_id ? `${settings.model.escalation_model_id}: ${settings.model.escalation_ready ? "ready" : settings.model.escalation_message}` : "Not configured"],
             ["Paid AI APIs", "None. Cloud sync is a separate optional service."],
           ]} />
           <p className="max-w-[75ch] text-sm text-muted-foreground">Change these in {settings.configFile} and restart SignalDesk. To try the installed 9B model, see "Comparing models" in the README: it runs separately and does not switch this app's model.</p>
@@ -117,18 +122,18 @@ export default function Settings() {
 }
 
 function ScheduleSection({ settings, onSaved }: { settings: SettingsResp; onSaved: () => void }) {
-  const [time, setTime] = useState(settings.schedule.time)
+  const [time, setTime] = useState((settings.schedule.times ?? [settings.schedule.time]).join(", "))
   const [error, setError] = useState<string | null>(null)
   const save = async (enabled: boolean, at = time) => {
     try { await api.send("/api/schedule", "PUT", { enabled, time: at }); setError(null); onSaved() } catch (e) { setError(e instanceof Error ? e.message : String(e)) }
   }
   const s = settings.schedule
   return (
-    <Section title="Daily schedule">
-      <p className="max-w-[75ch] text-sm text-muted-foreground">Runs every agent daily at this time (Asia/Kolkata), only while this laptop and SignalDesk are running. A missed run happens once at the next start. Nothing is added to Windows startup.</p>
+    <Section title="Schedule">
+      <p className="max-w-[75ch] text-sm text-muted-foreground">Sweeps at these times (Asia/Kolkata) while SignalDesk is open. A missed sweep runs once at the next start. To sweep while the app is closed, install the Windows task: see docs/V3_SETUP.md. Either way the PC must be on.</p>
       <div className="flex flex-wrap items-end gap-4">
-        <label className="flex items-center gap-2 text-sm"><Switch checked={s.enabled} onCheckedChange={(v) => save(!!v)} />Run daily</label>
-        <div className="flex w-36 flex-col gap-1"><Label htmlFor="time">Time</Label><Input id="time" type="time" value={time} onChange={(e) => setTime(e.target.value)} onBlur={() => save(s.enabled, time)} /></div>
+        <label className="flex items-center gap-2 text-sm"><Switch checked={s.enabled} onCheckedChange={(v) => save(!!v)} />Run on schedule</label>
+        <div className="flex w-56 flex-col gap-1"><Label htmlFor="time">Times, 24-hour</Label><Input id="time" value={time} onChange={(e) => setTime(e.target.value)} onBlur={() => save(s.enabled, time)} /></div>
       </div>
       {error && <p role="alert" className="text-sm text-(--destructive-text)">{error}</p>}
       <Facts rows={[["Next run", s.enabled && s.next_run ? when(s.next_run) : "Off"], ["Last scheduled run", s.last_result ?? "None"]]} />

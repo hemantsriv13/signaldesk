@@ -103,7 +103,8 @@ def job_item(engine, p: dict) -> dict:
     if fit and fit["output"]["evidence"]:
         why.append(f"Your background touches: {fit['output']['evidence'][0]['req']}")
     why.append(f"Pay: {p['comp']}")
-    return {"type": "job", "id": j["id"], "version": j["content_hash"][:8], "title": j["title"], "subtitle": f"{j['employer']} · {j['location_raw'] or 'location not stated'}",
+    return {"type": "job", "id": j["id"], "version": j["content_hash"][:8], "origin": "manual" if j["source"] in collect.MANUAL_SOURCES else "board",
+            "title": j["title"], "subtitle": f"{j['employer']} · {j['location_raw'] or 'location not stated'}",
             "summary": fit["output"]["summary"] if fit else None, "match": fit["output"]["match"] if fit else None,
             "why": why, "badges": badges, "detail": f"#/jobs/{j['id']}", "original_url": j["official_url"]}
 

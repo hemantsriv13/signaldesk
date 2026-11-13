@@ -351,7 +351,22 @@
   --sidebar-border: #d3e2d3;
   --border: #dcded3;
   --ring: #528c75;
+  --popover: #ffffff;
+  --popover-foreground: #203d36;
+  --secondary-foreground: #203d36;
+  /* Paired surfaces: each background has its own text colour, in both themes. */
+  --row-hover: #f1eee6;
+  --row-selected: #e4f2e8;
+  --row-selected-foreground: #163f31;
+  --row-indicator: #176754;
+  --quote: #f3efe6;
+  --quote-foreground: #203d36;
+  --chip: #ece8dd;
+  --chip-foreground: #203d36;
 }
+/* Every variable set in the :root block above must also be set here. This block comes after the
+   earlier .dark tokens, so anything missing here falls back to the LIGHT value above in dark mode
+   (that is how --muted turned evidence quotes into white text on beige). tests/test_theme_tokens.py checks it. */
 .dark {
   --background: #14251f;
   --foreground: #eff4e9;
@@ -361,16 +376,39 @@
   --sidebar-foreground: #eff4e9;
   --sidebar-accent: #294736;
   --sidebar-accent-foreground: #eff4e9;
+  --sidebar-border: #2c4236;
   --primary: #8ed6ac;
   --primary-foreground: #102c20;
+  --primary-hover: #a6e2bf;
+  --primary-active: #7cc79b;
   --primary-text: #a0ddba;
   --primary-wash: #284c36;
+  --primary-line: #3f6b54;
   --border: #385042;
+  --muted: #26392f;
   --muted-foreground: #b5c7b8;
   --secondary: #243c30;
   --accent: #2a4938;
   --accent-foreground: #f0f6ed;
+  --ring: #8ed6ac;
+  --popover: #1f342b;
+  --popover-foreground: #eff4e9;
+  --secondary-foreground: #eff4e9;
+  --row-hover: #213a2f;
+  --row-selected: #2a4a3a;
+  --row-selected-foreground: #f2f7ee;
+  --row-indicator: #8ed6ac;
+  --quote: #223a30;
+  --quote-foreground: #e6efe2;
+  --chip: #2c4437;
+  --chip-foreground: #eff4e9;
 }
+/* Native controls (select lists, scrollbars, date pickers) follow the app's theme, not the OS. */
+:root { color-scheme: light; }
+:root.dark { color-scheme: dark; }
+select option, select optgroup { background-color: var(--popover); color: var(--popover-foreground); }
+/* No colour transitions while the theme flips, so the page switches at once. */
+.theme-switching *, .theme-switching *::before, .theme-switching *::after { transition: none !important; }
 .brand-mark { display: grid; place-items: center; width: 34px; height: 34px; border-radius: 12px; background: #176754; color: #fff5de; font-size: 28px; font-style: italic; }
 .welcome-card { background: #e4efdc; color: #214f3a; border: 1px solid #d6e4ca; }
 .welcome-orbit { display: grid; place-items: center; width: 100px; height: 100px; border-radius: 50%; color: #bc673c; background: #f9dfb9; font-size: 66px; }

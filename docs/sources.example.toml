@@ -1,0 +1,33 @@
+# Optional: copy to <data dir>\sources.toml (D:\LocalAI\signaldesk\sources.toml) to add or change
+# discovery sources. You can also set page addresses and on/off in the app under Sources.
+# A source with the same format as an existing kind needs only an entry here.
+#
+# kind = "announcements"  investor or company news page, or an RSS/Atom feed (dated funding rounds)
+# kind = "portfolio"      portfolio page (membership only: goes to the watchlist, never counts as funding)
+# kind = "job_listings"   public job listing page (YC jobs, an investor's portfolio job board)
+# kind = "import"         a site you import saved listings from by hand (like Wellfound)
+#
+# Check each address in your browser first. A page that needs scripts to show its content
+# will show as "Temporarily unavailable" with the reason, never as zero results.
+
+# Set the WestBridge page once you have found its news or announcements page:
+# [[source]]
+# key = "westbridge"
+# url = "https://www.westbridgecap.com/..."
+
+# Another investor's announcements page:
+# [[source]]
+# key = "my_investor_news"
+# name = "Example Investor announcements"
+# kind = "announcements"
+# group = "funding"
+# investor = "Example Investor"
+# url = "https://example-investor.com/news"
+
+# An investor's portfolio job board (often lists employer ATS boards):
+# [[source]]
+# key = "example_portfolio_jobs"
+# name = "Example Investor portfolio jobs"
+# kind = "job_listings"
+# group = "jobs"
+# url = "https://jobs.example-investor.com/jobs"

@@ -238,3 +238,22 @@ Only items tested on the real app are listed as working. Last updated 2026-11-06
 Limits: new briefings need the laptop and Colibri running. Start with
 `powershell -File scripts\start-v2.ps1`, because `scripts\start.cmd` does not load the cloud
 settings. Supabase's free plan can pause a project after about a week of low activity.
+
+## V3: wider discovery, funded startups, contacts, twice-daily sweeps
+
+See [docs/V3_SETUP.md](docs/V3_SETUP.md). **Implemented in code, not yet run or tested.** Every row below
+is "Awaiting your validation" until the commands in that guide pass on this laptop.
+
+| Feature | Status | Needs |
+|---|---|---|
+| Wellfound import, YC jobs, cross-source merge | Implemented, not run | Wellfound: your saved listings. YC: nothing |
+| Funded startups (YC watchlist, WestBridge, Accel, Peak XV, Lightspeed) | Implemented, not run | Investor announcement page addresses (none confirmed yet) |
+| Role families from duties, location groups, pay bands | Implemented, not run | Your profile facts and "not claimed" list |
+| Contacts and drafts from public pages | Implemented, not run | Nothing; LinkedIn is not integrated |
+| Automatic sending | Not available | An authorised messaging integration (none exists for this project) |
+| Run now, shared lock, 08:00/20:00 schedule, Windows task | Implemented, not run | Opt-in: scripts\schedule-install.ps1 |
+| Larger-model escalation and replay comparison | Implemented, not run | A larger Colibri model you choose; nothing is downloaded |
+
+## Phone access on your Wi-Fi, and the Edge side panel
+
+See [docs/LAN_AND_PANEL.md](docs/LAN_AND_PANEL.md). **Implemented in code, not yet run or tested.** PC-only mode is unchanged and remains the default. LAN mode serves one signed-in HTTPS address and refuses to start without a password, a trusted certificate and a private address. The `extension/` folder is an Edge side panel for comparing jobs you paste, with no access to LinkedIn or other pages.

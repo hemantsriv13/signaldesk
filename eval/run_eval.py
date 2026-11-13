@@ -207,6 +207,118 @@ def report(runs: list[dict]) -> str:
     return "\n".join(lines) + "\n"
 
 
+# ---------------------------------------------------------------- replay: default model vs a larger one
+V3 = Path(__file__).resolve().parent.parent / "tests" / "fixtures" / "v3_synthetic.json"
+
+
+def _gpu_memory_mb() -> int | None:
+    """Used GPU memory from nvidia-smi, when it is installed. None otherwise."""
+    import shutil
+    import subprocess
+    if not shutil.which("nvidia-smi"):
+        return None
+    try:
+        out = subprocess.run(["nvidia-smi", "--query-gpu=memory.used", "--format=csv,noheader,nounits"], capture_output=True, text=True, timeout=10)
+        return int(out.stdout.strip().splitlines()[0])
+    except (OSError, ValueError, IndexError, subprocess.SubprocessError):
+        return None
+
+
+def replay(label: str, model_id: str | None, base_url: str | None, saved: int) -> int:
+    """Run the role-classification and job-fit prompts on identical examples: the synthetic role
+    fixtures (with expected answers) and N saved real jobs (no expected answer). Writes
+    <data dir>/evals/replay-<label>-<model>-<time>.json. Changes nothing in the app's database."""
+    cfg = load_config()
+    mcfg = replace(cfg.model, model_id=model_id or cfg.model.model_id, base_url=base_url or cfg.model.base_url)
+    llm = LocalModel(mcfg)
+    st = llm.status()
+    if not st["ready"]:
+        print(st["message"])
+        return 2
+    fx = json.loads(V3.read_text(encoding="utf-8"))
+    profile = ProfileStore(cfg.profile_path, None).profile() if cfg.profile_path.exists() else STARTER_PROFILE
+    items = [("role_classify", f"fixture-{r['id']}", {"title": r["title"], "employer": "Synthetic employer", "description_text": r["description"]}, r)
+             for r in fx["roles"]]
+    if saved and cfg.db_path.exists():
+        con = sqlite3.connect(cfg.db_path)
+        con.row_factory = sqlite3.Row
+        for r in con.execute("SELECT id, title, employer, location_raw, description_text FROM jobs WHERE bucket IN ('candidate', 'review') "
+                             "AND listing_state = 'open' AND duplicate_of IS NULL ORDER BY id DESC LIMIT ?", (saved,)):
+            items.append(("role_classify", f"saved-job-{r['id']}", dict(r), None))
+            items.append(("job_fit", f"saved-job-{r['id']}", dict(r), None))
+    mem_before = _gpu_memory_mb()
+    results = []
+    for kind, item_id, data, case in items:
+        rec = {"kind": kind, "item": item_id, "title": data["title"]}
+        start = time.monotonic()
+        try:
+            if kind == "role_classify":
+                prompt, _ = analysis.role_prompt(data, mcfg.prompt_char_budget)
+            else:
+                prompt, _ = analysis.job_prompt(data, profile, mcfg.prompt_char_budget)
+            r = llm.chat(analysis.SYSTEM, prompt, max_tokens=200 if kind == "role_classify" else None)
+            if r.model_served != mcfg.model_id:
+                raise RuntimeError(f"answered by {r.model_served}")
+            parsed = analysis.parse_json(r.text)
+            if kind == "role_classify":
+                out, val = analysis.validate_roles(parsed, data)
+                rec["confident"] = out["confidence"] == "clear"
+                if case:
+                    want, avoid = set(case["expected"]), set(case["not_expected"])
+                    got = set(out["families"]) - {"other"}
+                    rec["correct"] = want <= got and not (got & avoid) and (bool(want) or not got & {"founders_office", "strategy_ops"})
+            else:
+                out, val = analysis.validate_job(parsed, data, profile)
+                rec["confident"] = out["match"] != "unknown"
+            rec["unsupported"] = sum(("not found" in n) or ("removed" in n) for n in val["notes"])
+            rec.update(ok=True, output=out, ms=r.duration_ms)
+        except Exception as e:  # noqa: BLE001 - record and continue
+            rec.update(ok=False, error=f"{type(e).__name__}: {e}", confident=False, unsupported=0)
+        rec["seconds"] = round(time.monotonic() - start, 2)
+        print(f"{kind:13} {item_id:24} {'ok' if rec['ok'] else 'failed'}", flush=True)
+        results.append(rec)
+    stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    path = cfg.evals_dir / f"replay-{label}-{mcfg.model_id}-{stamp}.json"
+    path.write_text(json.dumps({"label": label, "model": mcfg.model_id, "gpu_mb_before": mem_before, "gpu_mb_after": _gpu_memory_mb(),
+                                "prompt_versions": analysis.PROMPT_VERSIONS, "results": results}, indent=2), encoding="utf-8")
+    print(f"Saved {path}")
+    return 0
+
+
+def replay_report(small: str, large: str) -> int:
+    a, b = (json.loads(Path(p).read_text(encoding="utf-8")) for p in (small, large))
+    def stats(run):
+        rs = run["results"]
+        labelled = [r for r in rs if "correct" in r]
+        secs = sorted(r["seconds"] for r in rs if r["ok"])
+        return {"valid": sum(r["ok"] for r in rs), "total": len(rs),
+                "accuracy": f"{sum(r['correct'] for r in labelled)}/{len(labelled)}" if labelled else "n/a",
+                "unsupported": sum(r.get("unsupported", 0) for r in rs),
+                "median_s": secs[len(secs) // 2] if secs else None, "p90_s": secs[int(len(secs) * 0.9)] if secs else None,
+                "gpu_mb": run.get("gpu_mb_after")}
+    sa, sb = stats(a), stats(b)
+    by = {(r["kind"], r["item"]): r for r in b["results"]}
+    weak = [r for r in a["results"] if not r["ok"] or not r.get("confident") or r.get("correct") is False]
+    improved = sum(1 for r in weak if (x := by.get((r["kind"], r["item"]))) and x["ok"] and x.get("confident")
+                   and x.get("correct", True) is not False)
+    lines = [f"# Replay: {a['model']} vs {b['model']}", "",
+             "Same examples, same prompts. Accuracy counts only the synthetic role fixtures that have expected answers.", "",
+             "| Measure | " + a["model"] + " | " + b["model"] + " |", "|---|---|---|"]
+    for k, label in (("valid", "Valid answers"), ("accuracy", "Role accuracy (fixtures)"), ("unsupported", "Unsupported claims or quotes removed"),
+                     ("median_s", "Median seconds"), ("p90_s", "90th percentile seconds"), ("gpu_mb", "GPU memory used after the run, MB")):
+        va = f"{sa[k]}/{sa['total']}" if k == "valid" else sa[k]
+        vb = f"{sb[k]}/{sb['total']}" if k == "valid" else sb[k]
+        lines.append(f"| {label} | {va if va is not None else 'not measured'} | {vb if vb is not None else 'not measured'} |")
+    lines += ["", f"Escalation: the default model was invalid, unsure or wrong on {len(weak)} item(s); the larger model gave a valid, "
+              f"confident{' and correct' if any('correct' in r for r in weak) else ''} answer on {improved} of them.", "",
+              "GPU memory is read from nvidia-smi when installed and reflects whatever else is loaded on the GPU."]
+    out = Path(small).with_name(f"replay-{a['model']}-vs-{b['model']}.md")
+    out.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    print("\n".join(lines))
+    print(f"\nSaved {out}")
+    return 0
+
+
 def compare(a: str, b: str) -> int:
     runs = [json.loads(Path(p).read_text(encoding="utf-8")) for p in (a, b)]
     out = Path(a).with_name(f"compare-{runs[0]['model']}-vs-{runs[1]['model']}.md")
@@ -225,11 +337,23 @@ def main(argv=None) -> int:
     c = sub.add_parser("compare")
     c.add_argument("a")
     c.add_argument("b")
+    r = sub.add_parser("replay", help="run role and fit prompts on identical examples with one model")
+    r.add_argument("--label", required=True, choices=["small", "large"])
+    r.add_argument("--model-id", help="exact id the server reports; defaults to the configured model")
+    r.add_argument("--base-url", help="server address if the larger model runs on another port")
+    r.add_argument("--saved", type=int, default=10, help="also use N saved real jobs")
+    rr = sub.add_parser("replay-report", help="compare two replay files")
+    rr.add_argument("small")
+    rr.add_argument("large")
     args = ap.parse_args(argv)
     if args.cmd == "rules":
         return rules()
     if args.cmd == "model":
         return model(args.model_id, args.saved)
+    if args.cmd == "replay":
+        return replay(args.label, args.model_id, args.base_url, args.saved)
+    if args.cmd == "replay-report":
+        return replay_report(args.small, args.large)
     return compare(args.a, args.b)
 
 

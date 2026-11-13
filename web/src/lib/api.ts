@@ -2,7 +2,20 @@ import { useCallback, useEffect, useRef, useState } from "react"
 
 export class ApiError extends Error {}
 
+// Sign-in state. On the HTTPS entry point every write carries the session's CSRF token; on this PC
+// (http://127.0.0.1) sign-in is not required and the token is simply absent.
+let csrf: string | null = null
+export interface AuthState { required: boolean; authenticated: boolean; csrf: string | null; passwordSet: boolean }
+export async function loadAuth(): Promise<AuthState> {
+  const r = await fetch("/api/auth/session", { credentials: "same-origin" })
+  const s = (await r.json()) as AuthState
+  csrf = s.csrf
+  return s
+}
+export function setCsrf(value: string | null) { csrf = value }
+
 async function handle<T>(r: Response): Promise<T> {
+  if (r.status === 401) window.dispatchEvent(new Event("signaldesk:signed-out"))
   if (!r.ok) {
     let msg = `Request failed (HTTP ${r.status})`
     try {
@@ -15,9 +28,13 @@ async function handle<T>(r: Response): Promise<T> {
 }
 
 export const api = {
-  get: <T,>(path: string) => fetch(path).then((r) => handle<T>(r)),
+  get: <T,>(path: string) => fetch(path, { credentials: "same-origin" }).then((r) => handle<T>(r)),
   send: <T,>(path: string, method: "POST" | "PUT" | "PATCH" | "DELETE", body?: unknown) =>
-    fetch(path, { method, headers: { "content-type": "application/json" }, body: body === undefined ? undefined : JSON.stringify(body) }).then((r) => handle<T>(r)),
+    fetch(path, {
+      method, credentials: "same-origin",
+      headers: { "content-type": "application/json", ...(csrf ? { "x-csrf-token": csrf } : {}) },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    }).then((r) => handle<T>(r)),
 }
 
 /** Load `path`, and reload every `everyMs` while the page is visible (0 = no polling). */
@@ -101,6 +118,7 @@ export interface ActiveRun {
   tasks: Record<string, number>
   stats: Record<string, number>
 }
+export interface SweepLast { group: string; finished_at: string; scope: string; trigger: string; summary: Record<string, number> }
 export interface Status {
   model: ModelState
   runs: ActiveRun[]
@@ -108,8 +126,24 @@ export interface Status {
   counts: Record<string, number>
   failures: { type: string; id: number; name: string; error: string; at: string }[]
   latestDigest: Digest | null
-  schedule: { enabled: boolean; time: string; next_run: string | null; last_result: string | null; timezone: string }
+  schedule: { enabled: boolean; time: string; times: string[]; next_run: string | null; last_result: string | null; timezone: string }
+  sweep: { lock: { owner: string; at: string; trigger: string; scope: string } | null; last: SweepLast | null }
 }
+export interface SourceInfo {
+  key: string; name: string; kind: string; group: string; url?: string; site?: string; note?: string; investor?: string; enabled: boolean
+  mode: "automatic" | "import_assisted" | "needs_setup" | "unavailable" | "off"; modeLabel: string
+  status: { last_attempt_at: string | null; last_success_at: string | null; last_error: string | null; last_error_at: string | null }
+  counts: Record<string, number | string>
+}
+export interface Contact {
+  id: number; job_id: number | null; startup_id: number | null; company: string; name: string; title: string | null; profile_url: string | null
+  evidence_url: string | null; evidence_text: string | null; why: string | null; status: "verified" | "unresolved" | "added_by_you"; origin: string
+  verified_at: string | null
+  outreach_id?: number | null; state?: OutreachState | null; note_text?: string | null; message_text?: string | null; drafted_by?: string | null
+  sent_at?: string | null
+}
+export type OutreachState = "drafted" | "sending" | "sent" | "failed" | "send_unknown" | "contacted"
+export interface FundingEvent { id: number; investor: string | null; round: string; amount_text: string | null; announced_on: string; announcement_url: string; title: string | null; other_reports?: string[] }
 export interface JobRow {
   id: number
   employer: string
@@ -130,6 +164,14 @@ export interface JobRow {
   match: string | null
   analysis_pending: boolean
   injection_flag: number
+  role_families: string[]
+  family_labels: string[]
+  comp_band: "above" | "overlaps" | "below" | "unknown"
+  comp_note: string
+  sources: string[]
+  funded_on: string | null
+  verification_state: "board" | "unverified"
+  apply_url: string | null
 }
 export interface Analysis<T> {
   id: number

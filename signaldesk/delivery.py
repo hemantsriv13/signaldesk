@@ -13,12 +13,14 @@ import httpx
 from .db import now_iso
 
 
-def public_snapshot(content):
-    # Export a read-only briefing, not the database, raw CV, or full source texts.
+def public_snapshot(content, include_manual=False):
+    # Export a read-only briefing, not the database, raw CV, or full source texts. Jobs you pasted
+    # in yourself (manual, Wellfound or side-panel imports) stay on this PC unless you opt in with
+    # SIGNALDESK_SYNC_MANUAL_IMPORTS=true. Contacts, drafts and profile facts are never exported.
     def item(x):
         return {k: x.get(k) for k in ('type', 'id', 'title', 'subtitle', 'summary', 'original_url', 'badges', 'match')}
     return {'generated_at': content['generated_at'], 'model_id': content.get('model_id'),
-            'jobs': [item(x) for x in content.get('jobs', [])],
+            'jobs': [item(x) for x in content.get('jobs', []) if include_manual or x.get('origin') != 'manual'],
             'articles': [item(x) for x in content.get('articles', [])],
             'case': item(content['case']) if content.get('case') else None,
             'term': {k: content['term'].get(k) for k in ('term', 'explanation')} if content.get('term') else None,
@@ -90,7 +92,7 @@ class Delivery:
                 state['cloud'] = 'removed'
                 self.db.set_setting(f'delivery:{row["id"]}', state)
             return
-        payload = public_snapshot(json.loads(row['content_json']))
+        payload = public_snapshot(json.loads(row['content_json']), include_manual=e.get('SIGNALDESK_SYNC_MANUAL_IMPORTS') == 'true')
         # Includes the owner so changing accounts uploads the briefings again.
         fingerprint = hashlib.sha256(json.dumps({'owner': e['SIGNALDESK_OWNER_ID'], 'payload': payload}, sort_keys=True).encode()).hexdigest()
         if state.get('fingerprint') != fingerprint or state.get('cloud') != 'synced':

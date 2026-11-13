@@ -16,10 +16,10 @@ const badgeVariants = cva(
   {
     variants: {
       variant: {
-        default: "text-foreground bg-[color:oklch(0.894_0.014_97.5)] dark:bg-[color:oklch(0.539_0.014_97.5)]",
+        default: "bg-(--chip) text-(--chip-foreground)",
         primary:
           "bg-primary text-[0.6875rem] uppercase tracking-wider text-primary-foreground",
-        secondary: "text-secondary-foreground bg-[color:oklch(0.893_0.011_95.2)] dark:bg-[color:oklch(0.538_0.011_95.2)]",
+        secondary: "bg-(--chip) text-(--chip-foreground)",
         outline: "border border-(--line-strong) bg-transparent text-foreground",
         success: "text-(--success-text) bg-[color:oklch(0.52_0.09_160/0.17)] dark:text-[color:oklch(0.875_0.08_160)]",
         warning: "text-(--warning-text) bg-[color:oklch(0.772_0.121_67.4/0.34)] dark:text-[color:oklch(0.875_0.106_75)]",

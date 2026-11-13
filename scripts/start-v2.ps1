@@ -10,4 +10,4 @@ if (Test-Path -LiteralPath $SecretsFile) {
         [Environment]::SetEnvironmentVariable($pair[0], $pair[1], 'Process')
     }
 }
-& "$PSScriptRoot\start.cmd"
+& "$PSScriptRoot\start.cmd" @args
