@@ -34,7 +34,8 @@ export function ExperimentalPill() {
 export function ExperimentalOff({ setting, what }: { setting: string; what: string }) {
   return (
     <p className="max-w-[75ch] text-sm text-muted-foreground">
-      {what} is off. To try it, set <code className="font-mono text-xs">{setting}</code> in config.toml and restart SignalDesk.
+      {what} is off. To try it, add <code className="font-mono text-xs">{setting}</code> to your settings file, config.toml in
+      the SignalDesk data folder, then restart SignalDesk.
     </p>
   )
 }

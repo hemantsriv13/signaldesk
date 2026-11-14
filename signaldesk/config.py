@@ -107,6 +107,7 @@ class Config:
     lan: LanConfig = field(default_factory=LanConfig)
     auth: AuthConfig = field(default_factory=AuthConfig)
     experimental: ExperimentalConfig = field(default_factory=ExperimentalConfig)
+    demo: bool = False                     # set only by --demo: synthetic data, no fetching, no model calls
 
     @property
     def auth_path(self) -> Path:

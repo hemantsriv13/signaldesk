@@ -1,0 +1,34 @@
+{
+  "_note": "SYNTHETIC PROFILE. Invented facts used by the tests and by demo mode (python -m signaldesk --demo). Not a real person.",
+  "name": "",
+  "summary": "",
+  "facts": [
+    {
+      "id": "P1",
+      "text": "Analyst for four years at a consumer goods company."
+    },
+    {
+      "id": "P2",
+      "text": "Worked on finance and supply-chain analytics."
+    },
+    {
+      "id": "P3",
+      "text": "Built data products."
+    },
+    {
+      "id": "P4",
+      "text": "Presented to business stakeholders."
+    },
+    {
+      "id": "P5",
+      "text": "Uses SQL, Python and BI tools."
+    },
+    {
+      "id": "P6",
+      "text": "Worked with cross-functional teams."
+    }
+  ],
+  "not_claimed": [
+    "Experience as a production machine learning engineer."
+  ]
+}

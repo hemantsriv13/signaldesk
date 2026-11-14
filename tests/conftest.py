@@ -88,10 +88,8 @@ def boards():
     return b
 
 
-TEST_PROFILE = {"name": "", "summary": "", "facts": [{"id": f"P{i}", "text": t} for i, t in enumerate([
-    "Analyst for four years at a consumer goods company.", "Worked on finance and supply-chain analytics.", "Built data products.",
-    "Presented to business stakeholders.", "Uses SQL, Python and BI tools.", "Worked with cross-functional teams."], 1)],
-    "not_claimed": ["Experience as a production machine learning engineer."]}
+TEST_PROFILE = {k: v for k, v in json.loads((Path(__file__).resolve().parent / "fixtures" / "profile_synthetic.json").read_text(encoding="utf-8")).items()
+                if not k.startswith("_")}
 
 
 @pytest.fixture

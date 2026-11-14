@@ -116,6 +116,11 @@ function Shell() {
           <SidebarFooter className="mt-auto hidden flex-col items-start gap-1 px-4 py-4 text-xs lg:flex">
             {error ? (
               <StatusIndicator variant="destructive">SignalDesk server not answering</StatusIndicator>
+            ) : status?.demo ? (
+              <>
+                <StatusIndicator variant="warning">Demo mode</StatusIndicator>
+                <span className="text-muted-foreground">Model calls and collection are off</span>
+              </>
             ) : model ? (
               <>
                 <StatusIndicator variant={model.ready ? "success" : "warning"}>{model.ready ? "Model ready" : model.reachable ? "Different model running" : "Model offline"}</StatusIndicator>
@@ -125,6 +130,11 @@ function Shell() {
           </SidebarFooter>
         </Sidebar>
         <main id="main" tabIndex={-1} className="flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto outline-none">
+          {status?.demo && (
+            <p role="status" className="border-b border-border bg-warning-tint px-4 py-2 text-sm text-warning-text sm:px-6">
+              <span className="font-semibold">Demo data.</span> Invented employers, jobs and articles. Nothing is fetched and no model is called.
+            </p>
+          )}
           {PAGES[page]()}
         </main>
       </div>

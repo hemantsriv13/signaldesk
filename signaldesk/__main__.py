@@ -80,6 +80,29 @@ def auth_main(argv) -> int:
     return 0
 
 
+def demo_main(args) -> int:
+    """Synthetic data in a new temporary folder. Your data folder, config.toml and cloud settings are
+    not read; nothing is fetched, no model is called, no schedule or cloud sync runs, and no LAN port opens."""
+    from . import demo
+    home = demo.start_home()
+    cfg = demo.build(home)
+    if args.port:
+        cfg.server.port = args.port
+    setup_logging(cfg.logs_dir)
+    engine = Engine(cfg, DB(cfg.db_path), demo.DemoModel(cfg.model), demo.DemoFetcher(cfg.fetch), start_worker=False)
+    app = create_app(engine, Scheduler(engine), delivery_env={})
+    url = f"http://127.0.0.1:{cfg.server.port}/"
+    print(demo.MESSAGE)
+    print(f"Demo data folder (temporary): {home}")
+    if not WEB.exists():
+        print("The web app is not built yet: run  cd web && npm install && npm run build  (the API still works).")
+    print(f"Open {url}")
+    if args.open:
+        webbrowser.open(url)
+    uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=cfg.server.port, log_level="warning", proxy_headers=False, server_header=False)).run()
+    return 0
+
+
 async def _serve(configs) -> None:
     import asyncio
     servers = [uvicorn.Server(c) for c in configs]
@@ -100,7 +123,10 @@ def main(argv=None) -> int:
     ap.add_argument("--start-model", action="store_true", help="start the existing Windows Colibri 4B launcher if port 8000 is free")
     ap.add_argument("--no-start-model", action="store_true", help="open SignalDesk without starting Colibri")
     ap.add_argument("--model-launcher", type=Path, help="path to your existing start-colibri.cmd")
+    ap.add_argument("--demo", action="store_true", help="run on invented demo data in a new temporary folder: nothing is fetched, no model is called")
     args = ap.parse_args(argv)
+    if args.demo:
+        return demo_main(args)
     cfg = load_config(args.home)
     if args.port:
         cfg.server.port = args.port

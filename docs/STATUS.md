@@ -49,6 +49,7 @@ of these carries the label **Experimental: not yet validated**.
 | Larger-model escalation and replay comparison | experimental, off | Set `[model] escalation_model_id`, then `python -m eval.run_eval replay --label small`, switch Colibri, `replay --label large --model-id ID`, `replay-report A B` ([V3_SETUP.md](V3_SETUP.md)) |
 | LAN mode (phone on your Wi-Fi) | experimental, off | The acceptance checks in [LAN_AND_PANEL.md](LAN_AND_PANEL.md) §6, all unverified |
 | Edge side panel (`side_panel`) | experimental, off | Set the switch, then LAN_AND_PANEL.md §4 step 4 and the last three rows of §6 |
+| Demo mode (`python -m signaldesk --demo`) | verified offline | `pytest tests/test_demo.py`: no network or model requests (socket-level guard), refusals for every collection and model action. Rendered once in Chrome on this laptop; screenshots not yet taken |
 
 ## Optional parts
 

@@ -159,11 +159,17 @@ def _hours(iso):
     return round((datetime.now(timezone.utc) - (dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc))).total_seconds() / 3600, 1)
 
 
-def create_app(engine: Engine, scheduler: Scheduler | None = None) -> FastAPI:
+# In demo mode these would fetch, call the model or sync, so they are refused.
+DEMO_BLOCKED = re.compile(r"^/api/(runs(/|$)|sweep$|digests/generate$|jobs/import$|jobs/\d+/(recheck|analyse|contacts/discover)$|articles/\d+/analyse$|"
+                          r"cases/import$|sources/discover$|sources/(companies|feeds)/\d+/test$|delivery/sync$|hiring/company/refresh$|"
+                          r"funding/\d+/resolve$|imports/listings$|schedule$|panel/)")
+
+
+def create_app(engine: Engine, scheduler: Scheduler | None = None, delivery_env: dict | None = None) -> FastAPI:
     app = FastAPI(title="SignalDesk", docs_url=None, redoc_url=None, openapi_url=None)
     db = engine.db
     scheduler = scheduler or Scheduler(engine)
-    delivery = Delivery(engine)
+    delivery = Delivery(engine, env=delivery_env)
     app.state.delivery = delivery
 
     cfg = engine.cfg
@@ -210,6 +216,8 @@ def create_app(engine: Engine, scheduler: Scheduler | None = None) -> FastAPI:
         elif host not in LOCAL_HOSTS:
             return deny(403, "SignalDesk only answers requests addressed to this computer.", lan)
         path, write = request.url.path, request.method not in ("GET", "HEAD", "OPTIONS")
+        if cfg.demo and write and DEMO_BLOCKED.match(path):
+            return deny(403, "Demo data: collection and model calls are off in demo mode.", lan)
         if path.startswith("/api/panel/") and not flags.get("side_panel"):
             return deny(403, "The Edge side panel is experimental and not yet validated. To try it, set [experimental] side_panel = true "
                              "in config.toml and restart SignalDesk.", lan)
@@ -356,6 +364,7 @@ def create_app(engine: Engine, scheduler: Scheduler | None = None) -> FastAPI:
             "latestDigest": {"id": latest["id"], "created_at": latest["created_at"], **json.loads(latest["content_json"])} if latest else None,
             "schedule": scheduler.describe(),
             "experimental": {**flags, "escalation": bool(cfg.model.escalation_model_id), "lan": bool(cfg.lan.enabled)},
+            "demo": cfg.demo,
         }
 
     # ------------------------------------------------------------ jobs

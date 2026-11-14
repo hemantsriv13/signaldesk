@@ -222,6 +222,7 @@ export default function Jobs() {
 function JobView({ id, statuses, onChange }: { id: number; statuses: string[]; onChange: () => void }) {
   const { data: j, reload } = useApi<JobDetail>(`/api/jobs/${id}`)
   const [note, setNote] = useState<string | null>(null)
+  const demo = !!useStatus().status?.demo
   useEffect(() => {
     if (!j?.task || !["queued", "running"].includes(j.task.status)) return
     const t = window.setInterval(reload, 4000)
@@ -328,8 +329,8 @@ function JobView({ id, statuses, onChange }: { id: number; statuses: string[]; o
       <div className="flex flex-wrap items-end gap-3">
         <div className="flex w-44 flex-col gap-1"><Label htmlFor="status">Your status</Label>
           <NativeSelect id="status" value={j.status} onChange={(e) => setStatus(e.target.value)}>{statuses.map((s) => <option key={s}>{s}</option>)}</NativeSelect></div>
-        <Button variant="outline" onClick={analyse} disabled={!!waiting}>{j.fit ? (j.fit.outdated ? "Re-analyse (outdated)" : "Analyse again") : "Analyse fit"}</Button>
-        <Button variant="ghost" onClick={recheck}><ArrowClockwiseIcon className="size-4" />Recheck listing</Button>
+        <Button variant="outline" onClick={analyse} disabled={!!waiting || demo}>{j.fit ? (j.fit.outdated ? "Re-analyse (outdated)" : "Analyse again") : "Analyse fit"}</Button>
+        <Button variant="ghost" onClick={recheck} disabled={demo}><ArrowClockwiseIcon className="size-4" />Recheck listing</Button>
       </div>
       {note && <p role="status" className="text-sm text-muted-foreground">{note}</p>}
       {j.task?.status === "failed" && <p className="text-sm text-(--destructive-text)">The last analysis failed: {j.task.error}</p>}

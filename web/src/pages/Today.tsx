@@ -160,7 +160,7 @@ export default function Today() {
             <option value="contacts">Contacts only</option><option value="reading">Reading</option>
             {sources?.sources.filter((s) => s.mode === "automatic" || s.mode === "unavailable").map((s) => <option key={s.key} value={`source:${s.key}`}>Only {s.name}</option>)}
           </NativeSelect>
-          <Button onClick={() => runAll()} disabled={running || !status}><PlayIcon className="size-4" />{running ? "Running" : "Run now"}</Button></>} />
+          <Button onClick={() => runAll()} disabled={running || !status || status.demo}><PlayIcon className="size-4" />{running ? "Running" : "Run now"}</Button></>} />
       {message && <p role="status" className="text-sm text-(--warning-text)">{message}</p>}
 
       {status && (
@@ -207,7 +207,7 @@ export default function Today() {
       )}
 
       <Section title={digest ? `Briefing from ${when(digest.created_at ?? digest.generated_at)}` : "Briefing"}
-        aside={digest && <Button size="sm" variant="outline" disabled={running} onClick={() => setConfirm(true)}>Regenerate</Button>}>
+        aside={digest && <Button size="sm" variant="outline" disabled={running || status.demo} onClick={() => setConfirm(true)}>Regenerate</Button>}>
         {digest ? <Briefing digest={digest} onFeedback={reload} /> : status && (
           <Empty title={c!.everCollected ? "No briefing yet" : "Nothing collected yet"}
             line={c!.everCollected ? "Run now to compose one from what has been collected." : "Run now to check the employer boards and feeds in Sources, analyse what matches, and write your first briefing."} />

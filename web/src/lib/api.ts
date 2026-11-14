@@ -125,6 +125,7 @@ export interface Experimental {
   escalation: boolean; lan: boolean
 }
 export interface Status {
+  demo: boolean
   experimental: Experimental
   model: ModelState
   runs: ActiveRun[]

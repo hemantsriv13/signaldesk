@@ -61,7 +61,7 @@ BUILTIN: list[dict] = [
 ]
 
 MODE_LABEL = {"automatic": "Automatic", "import_assisted": "Import-assisted", "needs_setup": "Needs setup",
-              "unavailable": "Temporarily unavailable", "off": "Off", "experimental_off": "Off in config"}
+              "unavailable": "Temporarily unavailable", "off": "Off", "experimental_off": "Off in settings file"}
 
 # Source kinds that are implemented but not validated, and the [experimental] switch each needs.
 EXPERIMENTAL_KIND = {"import": "listing_sources", "job_listings": "listing_sources", "announcements": "funding_announcements"}
