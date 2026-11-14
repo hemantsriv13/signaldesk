@@ -1,5 +1,7 @@
 # SignalDesk
 
+[![CI](https://github.com/hemantsriv13/signaldesk/actions/workflows/ci.yml/badge.svg)](https://github.com/hemantsriv13/signaldesk/actions/workflows/ci.yml)
+
 A personal job-search and AI-industry research desk that runs on one Windows laptop. It:
 
 - finds relevant jobs on employers' own job boards, so you can apply on their sites;
