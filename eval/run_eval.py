@@ -109,6 +109,13 @@ def _job_checks(case: dict, out: dict) -> dict:
     return checks
 
 
+def _sent(prompt: str, cov: dict, profile: dict, job: dict) -> dict:
+    """What a job-fit request actually carried, for human review (eval/review.py)."""
+    from eval.review import source_text
+    return {"requirements": source_text(prompt), "facts": [f for f in profile["facts"] if f["id"] in cov["profile_fact_ids"]],
+            "employer": job.get("employer"), "coverage": cov}
+
+
 def model(model_id: str | None, saved: int) -> int:
     cfg = load_config()
     mcfg = replace(cfg.model, model_id=model_id or cfg.model.model_id)
@@ -148,7 +155,8 @@ def model(model_id: str | None, saved: int) -> int:
                     raise RuntimeError(f"answered by {r.model_served}")
                 return analysis.parse_json(r.text)
             if kind == "job_fit":
-                prompt, _ = analysis.job_prompt(data, profile, mcfg.prompt_char_budget)
+                prompt, cov = analysis.job_prompt(data, profile, mcfg.prompt_char_budget)
+                rec["sent"] = _sent(prompt, cov, profile, data)
                 out, val = analysis.validate_job(call(prompt), data, profile)
                 rec["checks"] = _job_checks(case, out) if case else {"quotes found": f"{sum(r['quote_found'] for r in out['essential'] + out['preferred'])}/{len(out['essential'] + out['preferred'])}"}
             elif kind == "reading_card":
@@ -255,7 +263,8 @@ def replay(label: str, model_id: str | None, base_url: str | None, saved: int) -
             if kind == "role_classify":
                 prompt, _ = analysis.role_prompt(data, mcfg.prompt_char_budget)
             else:
-                prompt, _ = analysis.job_prompt(data, profile, mcfg.prompt_char_budget)
+                prompt, cov = analysis.job_prompt(data, profile, mcfg.prompt_char_budget)
+                rec["sent"] = _sent(prompt, cov, profile, data)
             r = llm.chat(analysis.SYSTEM, prompt, max_tokens=200 if kind == "role_classify" else None)
             if r.model_served != mcfg.model_id:
                 raise RuntimeError(f"answered by {r.model_served}")

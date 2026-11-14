@@ -63,4 +63,4 @@ The run was started from the UI, with confirmation, after the text budget was ra
 
 ## Human review
 
-Not done. Read the outputs in `<data dir>\evals\*.md`, or in the app, and record your judgement here.
+Not done. Use the kit in [HUMAN_REVIEW.md](HUMAN_REVIEW.md): export a sheet, fill in your verdicts, score it, and record the counts here.

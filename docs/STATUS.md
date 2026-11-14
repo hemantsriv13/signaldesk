@@ -36,8 +36,8 @@ of these carries the label **Experimental: not yet validated**.
 | Hiring companies (employers with eligible openings) | verified | README V3 table: tested on a copy of real data, 17 companies, 287 openings |
 | Portfolio discovery: YC India, WestBridge portfolio | verified | README V3 table: tested live on a copy, 50 YC + 12 WestBridge companies |
 | Automatic checks on 4B model output | verified | EVALUATION.md §3: 12 of 12 items valid |
-| **Human review of job-fit judgements** | not done | EVALUATION.md "Human review": blank |
-| 9B model comparison | not run | EVALUATION.md §3; commands in the README, "Comparing models" |
+| **Human review of job-fit judgements** | not done | Kit ready: [HUMAN_REVIEW.md](HUMAN_REVIEW.md) (`python -m eval.review export`, then `score`). EVALUATION.md "Human review" is blank |
+| 9B model comparison | not run | EVALUATION.md §3; commands in [HUMAN_REVIEW.md](HUMAN_REVIEW.md) §4 |
 | Wellfound import and YC jobs (`listing_sources`) | experimental, off | Set the switch, restart, import a saved Wellfound list under Sources → Discovery sources, and run `python -m signaldesk sweep --scope jobs`. Check that listings match employer boards and unmatched ones stay "Not yet on employer's board" |
 | Investor announcement pages: WestBridge, Accel, Peak XV, Lightspeed (`funding_announcements`) | experimental, off | Set the switch, add a confirmed page address in Sources, run `python -m signaldesk sweep --scope funding`, and compare the dated rounds with the announcement pages |
 | Role families from duties, and model checks of unclear titles (`duty_role_families`) | experimental, off | Set the switch, run a jobs sweep, and check placements against the postings, especially "Special Projects" roles and sales roles that mention strategy. Off means families come from the title, as in the verified first release |
