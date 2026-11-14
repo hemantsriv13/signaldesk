@@ -25,3 +25,9 @@ web/android/**/build/
 *.jks
 web/dist-mobile/
 delivery.env
+
+# Local agent settings
+.claude/
+
+# Patch files are kept outside the repo
+signaldesk-*.patch
