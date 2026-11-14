@@ -30,6 +30,10 @@ def sweep_main(argv) -> int:
     ap.add_argument("--start-model", action="store_true", help="start the existing Colibri 4B launcher first if port 8000 is free")
     args = ap.parse_args(argv)
     cfg = load_config(args.home)
+    if args.trigger != "manual" and not cfg.experimental.schedule:
+        print("Scheduled sweeps are experimental and not yet validated. To use them, set [experimental] schedule = true "
+              f"in {cfg.home / 'config.toml'}. Nothing was run.")
+        return 2
     setup_logging(cfg.logs_dir)
     if args.start_model:
         print(start_local_model(cfg.model, None), flush=True)

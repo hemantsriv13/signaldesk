@@ -266,9 +266,12 @@ def _duty_hits(sentences: list[str], patterns: list[str]) -> tuple[int, list[str
     return len(matched), lines
 
 
-def classify_roles(title: str, description: str | None = None) -> tuple[list[str], list[str], bool]:
+def classify_roles(title: str, description: str | None = None, use_duties: bool = True) -> tuple[list[str], list[str], bool]:
     """Return (families, evidence sentences, ambiguous). Several families can apply to one job.
-    `ambiguous` marks a job worth one local-model look when its location already qualifies."""
+    `ambiguous` marks a job worth one local-model look when its location already qualifies.
+    With use_duties=False the description is ignored: families come from the title only."""
+    if not use_duties:
+        description = None
     fams = [key for key, _label, pat in FAMILIES if re.search(pat, title, re.I)]
     sales, assistant = bool(SALES_TITLE.search(title)), bool(ASSISTANT_TITLE.search(title))
     explicit = bool(EXPLICIT_FOUNDER.search(title))

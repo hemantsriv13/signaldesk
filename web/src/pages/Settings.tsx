@@ -3,7 +3,7 @@ import { SecuritySettings } from "@/components/security-settings"
 import { useEffect, useState } from "react"
 import { useStatus } from "@/App"
 import { CvImport } from "@/components/cv-import"
-import { Facts, PageHeader, Section } from "@/components/common"
+import { ExperimentalOff, ExperimentalPill, Facts, PageHeader, Section } from "@/components/common"
 import { PlusIcon, XIcon } from "@/components/icons"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
@@ -20,7 +20,7 @@ interface Prefs { locations: string[]; role_families: string[]; ctc_threshold_la
 interface ProfileResp { profile: Profile; version: string; preferences: Prefs; families: Record<string, string>; locations: Record<string, string> }
 interface SettingsResp {
   model: Record<string, string | number>; limits: Record<string, number>; fetch: Record<string, string | number>; dataDir: string; configFile: string
-  schedule: { enabled: boolean; time: string; times: string[]; next_run: string | null; last_result: string | null; last_slot: string | null }
+  schedule: { enabled: boolean; allowed: boolean; time: string; times: string[]; next_run: string | null; last_result: string | null; last_slot: string | null }
 }
 interface Suggestion { id: string; text: string }
 
@@ -111,7 +111,7 @@ export default function Settings() {
             ["Text per request", `about ${settings.model.prompt_char_budget} characters`],
             ["Attempts per item", String(settings.model.max_attempts)],
             ["Requests at once", String(settings.model.concurrency)],
-            ["Larger model for unclear cases", settings.model.escalation_model_id ? `${settings.model.escalation_model_id}: ${settings.model.escalation_ready ? "ready" : settings.model.escalation_message}` : "Not configured"],
+            ["Larger model for unclear cases", <span key="escalation" className="flex flex-wrap items-center gap-2">{settings.model.escalation_model_id ? `${settings.model.escalation_model_id}: ${settings.model.escalation_ready ? "ready" : settings.model.escalation_message}` : "Not configured"}<ExperimentalPill /></span>],
             ["Paid AI APIs", "None. Cloud sync is a separate optional service."],
           ]} />
           <p className="max-w-[75ch] text-sm text-muted-foreground">Change these in {settings.configFile} and restart SignalDesk. To try the installed 9B model, see "Comparing models" in the README: it runs separately and does not switch this app's model.</p>
@@ -129,14 +129,15 @@ function ScheduleSection({ settings, onSaved }: { settings: SettingsResp; onSave
   }
   const s = settings.schedule
   return (
-    <Section title="Schedule">
+    <Section title="Schedule" aside={<ExperimentalPill />}>
       <p className="max-w-[75ch] text-sm text-muted-foreground">Sweeps at these times (Asia/Kolkata) while SignalDesk is open. A missed sweep runs once at the next start. To sweep while the app is closed, install the Windows task: see docs/V3_SETUP.md. Either way the PC must be on.</p>
+      {!s.allowed && <ExperimentalOff setting="[experimental] schedule = true" what="The schedule" />}
       <div className="flex flex-wrap items-end gap-4">
-        <label className="flex items-center gap-2 text-sm"><Switch checked={s.enabled} onCheckedChange={(v) => save(!!v)} />Run on schedule</label>
-        <div className="flex w-56 flex-col gap-1"><Label htmlFor="time">Times, 24-hour</Label><Input id="time" value={time} onChange={(e) => setTime(e.target.value)} onBlur={() => save(s.enabled, time)} /></div>
+        <label className="flex items-center gap-2 text-sm"><Switch checked={s.enabled && s.allowed} disabled={!s.allowed} onCheckedChange={(v) => save(!!v)} />Run on schedule</label>
+        <div className="flex w-56 flex-col gap-1"><Label htmlFor="time">Times, 24-hour</Label><Input id="time" value={time} disabled={!s.allowed} onChange={(e) => setTime(e.target.value)} onBlur={() => save(s.enabled, time)} /></div>
       </div>
       {error && <p role="alert" className="text-sm text-(--destructive-text)">{error}</p>}
-      <Facts rows={[["Next run", s.enabled && s.next_run ? when(s.next_run) : "Off"], ["Last scheduled run", s.last_result ?? "None"]]} />
+      <Facts rows={[["Next run", s.enabled && s.allowed && s.next_run ? when(s.next_run) : "Off"], ["Last scheduled run", s.last_result ?? "None"]]} />
     </Section>
   )
 }

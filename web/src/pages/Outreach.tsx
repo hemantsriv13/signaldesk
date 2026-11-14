@@ -1,5 +1,5 @@
 import { useState } from "react"
-import { Empty, PageHeader, Pill, RunHistoryLink, Section } from "@/components/common"
+import { Empty, ExperimentalOff, ExperimentalPill, PageHeader, Pill, RunHistoryLink, Section } from "@/components/common"
 import { ContactCard } from "@/components/outreach"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -14,7 +14,7 @@ interface Item extends Contact {
   contact_status: Contact["status"]; updated_at: string; error: string | null
 }
 interface Resp {
-  items: Item[]; counts: Record<string, number>
+  items: Item[]; counts: Record<string, number>; experimental: { contacts: boolean }
   settings: { autosend: boolean; daily_cap: number; stopped: boolean; job_ids: number[] }
   sending: { available: boolean; reason: string }
   unresolved: (Contact & { job_title: string | null })[]
@@ -30,7 +30,8 @@ export default function Outreach() {
   return (
     <div className="flex flex-col gap-8 p-4 sm:p-6">
       <PageHeader title="Outreach" line="People to contact about shortlisted roles. A draft is never a sent message."
-        action={<RunHistoryLink agent="contact_scout" label="Contact Scout" />} />
+        action={<><ExperimentalPill /><RunHistoryLink agent="contact_scout" label="Contact Scout" /></>} />
+      {data && !data.experimental.contacts && <ExperimentalOff setting="[experimental] contacts = true" what="Finding contacts and writing drafts" />}
       <Tabs value={view} onValueChange={(v) => setView(String(v))}>
         <TabsList className="flex-wrap">{VIEWS.map(([v, label]) => <TabsTrigger key={v} value={v}>{label} ({v === "problem" ? problems : data?.counts[v] ?? 0})</TabsTrigger>)}</TabsList>
       </Tabs>

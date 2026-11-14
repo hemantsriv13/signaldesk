@@ -36,9 +36,12 @@ DEFAULT_PREFS = {
 
 
 class ProfileStore:
-    def __init__(self, path: Path, db):
+    def __init__(self, path: Path, db, experimental=None):
         self.path = path
         self.db = db
+        # The [experimental] config. Its duty_role_families switch reaches the rules with the
+        # preferences; it is never stored with them.
+        self.experimental = experimental
 
     def profile(self) -> dict:
         if not self.path.exists():
@@ -66,13 +69,14 @@ class ProfileStore:
 
     def prefs(self) -> dict:
         stored = self.db.get_setting("preferences") or {}
-        return {**DEFAULT_PREFS, **stored}
+        return {**DEFAULT_PREFS, **stored, "duty_role_families": bool(getattr(self.experimental, "duty_role_families", False))}
 
     def save_prefs(self, data: dict) -> dict:
-        merged = {**self.prefs(), **{k: v for k, v in data.items() if k in DEFAULT_PREFS}}
+        current = {k: v for k, v in self.prefs().items() if k in DEFAULT_PREFS}
+        merged = {**current, **{k: v for k, v in data.items() if k in DEFAULT_PREFS}}
         merged["ctc_threshold_lakh"] = float(merged["ctc_threshold_lakh"])
         self.db.set_setting("preferences", merged)
-        return merged
+        return self.prefs()
 
     def prefs_version(self, keys: tuple[str, ...]) -> str:
         p = self.prefs()

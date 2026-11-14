@@ -54,3 +54,13 @@ session_idle_hours = 12
 session_max_days = 7
 require_login_local = false                # also require sign-in on http://127.0.0.1:8780
 panel_token_days = 90
+
+[experimental]
+# Implemented but not yet validated on this laptop (see docs\STATUS.md). Each stays off, and cannot
+# run, until you set it to true. The app labels each one "Experimental: not yet validated".
+listing_sources = false                    # Wellfound import and Y Combinator jobs
+funding_announcements = false              # investor announcement pages
+duty_role_families = false                 # role families from duties, and model checks of unclear titles
+contacts = false                           # contact discovery and outreach drafts
+schedule = false                           # 08:00/20:00 in-app schedule and the Windows scheduled task
+side_panel = false                         # Edge side panel API and pairing tokens

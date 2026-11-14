@@ -86,6 +86,18 @@ class AuthConfig:
 
 
 @dataclass
+class ExperimentalConfig:
+    """Features that are implemented but not yet validated on this laptop. Each one stays off, and
+    cannot run, until you set it to true here. See docs/STATUS.md for what would verify each."""
+    listing_sources: bool = False          # Wellfound import and Y Combinator jobs
+    funding_announcements: bool = False    # investor announcement pages (WestBridge, Accel, Peak XV, Lightspeed, your own)
+    duty_role_families: bool = False       # role families from duties, and model checks of unclear titles
+    contacts: bool = False                 # contact discovery and outreach drafts
+    schedule: bool = False                 # 08:00/20:00 in-app schedule and the Windows scheduled task
+    side_panel: bool = False               # Edge side panel API and pairing tokens
+
+
+@dataclass
 class Config:
     home: Path
     server: ServerConfig = field(default_factory=ServerConfig)
@@ -94,6 +106,7 @@ class Config:
     limits: LimitsConfig = field(default_factory=LimitsConfig)
     lan: LanConfig = field(default_factory=LanConfig)
     auth: AuthConfig = field(default_factory=AuthConfig)
+    experimental: ExperimentalConfig = field(default_factory=ExperimentalConfig)
 
     @property
     def auth_path(self) -> Path:
@@ -136,7 +149,7 @@ def load_config(home: Path | None = None) -> Config:
     path = home / "config.toml"
     if path.exists():
         data = tomllib.loads(path.read_text(encoding="utf-8"))
-        for section in ("server", "model", "fetch", "limits", "lan", "auth"):
+        for section in ("server", "model", "fetch", "limits", "lan", "auth", "experimental"):
             _apply(getattr(cfg, section), data.get(section, {}))
     for d in (cfg.home, cfg.logs_dir, cfg.digests_dir, cfg.evals_dir):
         d.mkdir(parents=True, exist_ok=True)

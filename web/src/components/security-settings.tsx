@@ -1,5 +1,6 @@
 import { useState, type ReactNode } from "react"
-import { Facts, Pill, Section } from "@/components/common"
+import { useStatus } from "@/App"
+import { ExperimentalOff, ExperimentalPill, Facts, Pill, Section } from "@/components/common"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -12,7 +13,9 @@ interface TokenRow { id: number; label: string; hint: string; created_at: string
 /** Signed-in devices and side-panel pairings. Revoking a panel token stops imports at once; the app keeps working. */
 export function SecuritySettings() {
   const { data: sessions, reload: reloadSessions } = useApi<{ sessions: SessionRow[] }>("/api/auth/sessions")
-  const { data: tokens, reload: reloadTokens } = useApi<{ tokens: TokenRow[] }>("/api/panel/tokens")
+  const panelOn = !!useStatus().status?.experimental.side_panel
+  // The panel API refuses every request while the side panel is off, so only ask when it is on.
+  const { data: tokens, reload: reloadTokens } = useApi<{ tokens: TokenRow[] }>(panelOn ? "/api/panel/tokens" : null)
   const [label, setLabel] = useState("Edge side panel")
   const [fresh, setFresh] = useState<string | null>(null)
   const [message, setMessage] = useState<string | null>(null)
@@ -31,7 +34,7 @@ export function SecuritySettings() {
     <Section title="Security">
       {message && <p role="status" className="text-sm text-muted-foreground">{message}</p>}
       <div className="flex flex-col gap-2">
-        <p className="text-sm font-medium">Signed-in devices (HTTPS entry point)</p>
+        <p className="flex flex-wrap items-center gap-2 text-sm font-medium">Signed-in devices (phone access on your Wi-Fi) <ExperimentalPill /></p>
         {sessions?.sessions.length ? (
           <ul className="flex flex-col gap-1 text-sm">{sessions.sessions.map((s) => (
             <li key={s.id}>{s.current && <Pill tone="success">This device</Pill>} {s.user_agent?.slice(0, 60) || "Unknown browser"} · {s.ip} · last active {when(s.last_seen_at)}</li>))}</ul>
@@ -42,11 +45,12 @@ export function SecuritySettings() {
         </div>
       </div>
       <div className="flex flex-col gap-2">
-        <p className="text-sm font-medium">Edge side panel</p>
+        <p className="flex flex-wrap items-center gap-2 text-sm font-medium">Edge side panel <ExperimentalPill /></p>
         <p className="max-w-[75ch] text-sm text-muted-foreground">A pairing token lets the panel import and compare jobs only. It cannot open settings, contacts, outreach, exports or runs.</p>
+        {!panelOn && <ExperimentalOff setting="[experimental] side_panel = true" what="The side panel" />}
         <div className="flex flex-wrap items-end gap-2">
-          <div className="flex w-64 flex-col gap-1"><Label htmlFor="tok-label">Name</Label><Input id="tok-label" value={label} onChange={(e) => setLabel(e.target.value)} /></div>
-          <Button variant="outline" onClick={pair}>Create pairing token</Button>
+          <div className="flex w-64 flex-col gap-1"><Label htmlFor="tok-label">Name</Label><Input id="tok-label" value={label} disabled={!panelOn} onChange={(e) => setLabel(e.target.value)} /></div>
+          <Button variant="outline" onClick={pair} disabled={!panelOn}>Create pairing token</Button>
         </div>
         {fresh && (
           <div role="status" className="flex flex-col gap-1 rounded-lg bg-muted p-3 text-sm">

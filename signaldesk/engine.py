@@ -57,7 +57,7 @@ def _iso_in(seconds: float) -> str:
 class Engine:
     def __init__(self, cfg: Config, db: DB, model: LocalModel, fetcher: Fetcher, *, start_worker: bool = True):
         self.cfg, self.db, self.model, self.fetcher = cfg, db, model, fetcher
-        self.profiles = ProfileStore(cfg.profile_path, db)
+        self.profiles = ProfileStore(cfg.profile_path, db, cfg.experimental)
         self.wake = threading.Event()
         self.stop_flag = threading.Event()
         self.model_state = {"ready": False, "message": "Not checked yet", "checked_at": None}
@@ -78,6 +78,11 @@ class Engine:
                 t.start()
                 self.workers.append(t)
             self.worker = self.workers[0]
+
+    @property
+    def flags(self) -> dict:
+        """The [experimental] config switches. Each experimental feature checks its own."""
+        return vars(self.cfg.experimental)
 
     # ------------------------------------------------------------ runs
     def _resume(self) -> None:
@@ -283,7 +288,7 @@ class Engine:
 
     # ------------------------------------------------------------ collection phases
     def sources(self) -> list[dict]:
-        return registry.load(self.db, self.cfg.home)
+        return registry.load(self.db, self.cfg.home, self.flags)
 
     def _collect_funding_scout(self, run_id: int) -> None:
         only = self._options(run_id).get("source")
@@ -358,6 +363,9 @@ class Engine:
         self._stat(run_id, **totals, merged_later=merged)
 
     def _collect_contact_scout(self, run_id: int) -> None:
+        if not self.cfg.experimental.contacts:
+            self._log(run_id, "Contacts and drafts are experimental and off. Set [experimental] contacts = true in config.toml to use them.")
+            return
         # Waits in the queue behind fit analyses, so it can use them to choose the shortlist.
         self.db.insert("tasks", {"run_id": run_id, "kind": "contact_select", "target_type": "run", "target_id": run_id, "status": "queued",
                                  "created_at": now_iso(), "priority": 80, "max_attempts": 1})
@@ -396,7 +404,7 @@ class Engine:
             return
         # Only titles the rules could not place, and only where the location already qualifies:
         # a clear location mismatch never costs a model call.
-        amb = self.db.all("SELECT id FROM jobs WHERE role_source = 'rules_uncertain' AND listing_state = 'open' AND duplicate_of IS NULL "
+        amb = [] if not self.cfg.experimental.duty_role_families else self.db.all("SELECT id FROM jobs WHERE role_source = 'rules_uncertain' AND listing_state = 'open' AND duplicate_of IS NULL "
                           "AND location_class IN ('bengaluru', 'remote_india') ORDER BY first_seen_at DESC LIMIT ?",
                           (self.cfg.limits.max_role_checks_per_run,))
         roles_queued = sum(self.analyse("role_classify", r["id"], run_id, 28) == "queued" for r in amb)
@@ -724,6 +732,8 @@ class Engine:
 
     def _do_contact_select(self, task: dict) -> str:
         run_id = task["run_id"]
+        if not self.cfg.experimental.contacts:
+            return "Contacts are experimental and off in config; nothing was looked up"
         week_ago = _iso_in(-7 * 86400)
         rows = self.db.all(
             "SELECT j.* FROM jobs j WHERE j.listing_state = 'open' AND j.duplicate_of IS NULL AND (j.status IN ('Interested', 'Investigate') "

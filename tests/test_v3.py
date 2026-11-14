@@ -142,6 +142,7 @@ def test_source_failing_midway_keeps_processed_items_and_skips_nothing(engine, b
 
 
 def test_listing_page_with_nothing_recognisable_is_unavailable_not_zero(engine, boards):
+    engine.cfg.experimental.listing_sources = True   # experimental: on as config.toml would set it
     db = engine.db
     cid = add_company(db, "Synthetic Startup C (fixture)", "synthc")
     boards.routes["https://boards-api.greenhouse.io/v1/boards/synthc/"] = (200, greenhouse([{"id": 301, "title": "Chief of Staff"}]))
@@ -151,7 +152,7 @@ def test_listing_page_with_nothing_recognisable_is_unavailable_not_zero(engine, 
     totals = engine._collect_listing_sources(engine.db.insert("runs", {"agent": "job_scout", "trigger": "manual", "status": "collecting",
                                                                        "started_at": RECENT}), engine.profiles.prefs())
     assert totals["listing_sources_failed"] == 1
-    assert registry.get(db, engine.cfg.home, "yc_jobs")["mode"] == "unavailable"
+    assert registry.get(db, engine.cfg.home, "yc_jobs", engine.flags)["mode"] == "unavailable"
     # A board that suddenly fails changes nothing about its jobs.
     boards.routes["https://boards-api.greenhouse.io/v1/boards/synthc/"] = (500, "down")
     collect.collect_jobs(db, engine.fetcher, engine.profiles.prefs())

@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
 import { useStatus } from "@/App"
 import {
-  Empty, Evidence, ExternalLink, Facts, FeedbackSelect, FreshnessPill, ListDetail, ListItem, LOCATION_TONE, MatchPill, ModelNote, PageHeader, Pill, RunHistoryLink, Section,
+  Empty, Evidence, ExperimentalOff, ExperimentalPill, ExternalLink, Facts, FeedbackSelect, FreshnessPill, ListDetail, ListItem, LOCATION_TONE, MatchPill, ModelNote, PageHeader, Pill, RunHistoryLink, Section,
 } from "@/components/common"
 import { ArrowClockwiseIcon, ArrowSquareOutIcon, BookmarkSimpleIcon, CheckCircleIcon, PlusIcon, WarningIcon, XIcon } from "@/components/icons"
 import { ContactCard } from "@/components/outreach"
@@ -351,7 +351,7 @@ function JobView({ id, statuses, onChange }: { id: number; statuses: string[]; o
             </>
           ) : <p className="text-sm text-muted-foreground">No model assessment yet.</p>}
           {!!j.role_evidence_list.length && (
-            <Section title="Duties that place it in this role family">
+            <Section title="Duties that place it in this role family" aside={<ExperimentalPill />}>
               <ul className="flex flex-col gap-2">{j.role_evidence_list.map((e) => <li key={e}><Evidence quote={e} found /></li>)}</ul>
             </Section>
           )}
@@ -410,6 +410,7 @@ function FundingSection({ f }: { f: JobDetail["funding"] }) {
 }
 
 function ContactsSection({ job, onChange }: { job: JobDetail; onChange: () => void }) {
+  const on = !!useStatus().status?.experimental.contacts
   const [note, setNote] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [adding, setAdding] = useState(false)
@@ -431,9 +432,10 @@ function ContactsSection({ job, onChange }: { job: JobDetail; onChange: () => vo
   }
   const set = (k: keyof typeof form) => (e: { target: { value: string } }) => setForm({ ...form, [k]: e.target.value })
   return (
-    <Section title="Who to contact" aside={<div className="flex gap-2">
-      <Button size="sm" variant="outline" onClick={find} disabled={busy}>{busy ? "Looking" : job.contacts.length ? "Look again" : "Find contacts"}</Button>
-      <Button size="sm" variant="ghost" onClick={() => setAdding(!adding)} aria-expanded={adding}>Add one yourself</Button></div>}>
+    <Section title="Who to contact" aside={<div className="flex flex-wrap items-center gap-2"><ExperimentalPill />
+      <Button size="sm" variant="outline" onClick={find} disabled={busy || !on}>{busy ? "Looking" : job.contacts.length ? "Look again" : "Find contacts"}</Button>
+      <Button size="sm" variant="ghost" onClick={() => setAdding(!adding)} disabled={!on} aria-expanded={adding}>Add one yourself</Button></div>}>
+      {!on && <ExperimentalOff setting="[experimental] contacts = true" what="Contact discovery" />}
       {note && <p role="status" className="text-sm text-muted-foreground">{note}</p>}
       {adding && (
         <form onSubmit={add} className="grid gap-3 rounded-lg border border-border p-3 sm:grid-cols-2">

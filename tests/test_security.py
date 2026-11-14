@@ -106,7 +106,14 @@ def test_lan_mode_fails_closed(engine):
 
 
 # ---------------------------------------------------------------- side-panel token scope
-def test_panel_token_only_reaches_panel_routes_and_revocation_stops_it(engine):
+@pytest.fixture
+def panel_on(engine):
+    """The side panel is experimental: these tests switch it on as config.toml would."""
+    engine.cfg.experimental.side_panel = True
+    return engine
+
+
+def test_panel_token_only_reaches_panel_routes_and_revocation_stops_it(engine, panel_on):
     c = TestClient(create_app(engine))
     tid, token = auth.create_panel_token(engine.db, "test panel", 90)
     h = {"authorization": f"Bearer {token}"}
@@ -135,6 +142,7 @@ Bengaluru, Karnataka, India (Hybrid)
 
 
 def panel(engine):
+    engine.cfg.experimental.side_panel = True
     c = TestClient(create_app(engine))
     _tid, token = auth.create_panel_token(engine.db, "test", 90)
     return c, {"authorization": f"Bearer {token}"}
@@ -206,7 +214,7 @@ def test_panel_token_cannot_write_admin_or_outreach(engine):
     assert c.post("/api/panel/tokens", json={"label": "escalate"}, headers=h).status_code == 403
 
 
-def test_expired_panel_token_is_refused(engine):
+def test_expired_panel_token_is_refused(engine, panel_on):
     c = TestClient(create_app(engine))
     tid, token = auth.create_panel_token(engine.db, "old", 1)
     engine.db.run("UPDATE panel_tokens SET expires_at = '2000-01-01T00:00:00+00:00' WHERE id = ?", (tid,))
@@ -214,6 +222,7 @@ def test_expired_panel_token_is_refused(engine):
 
 
 def test_two_full_descriptions_compare_and_model_offline_keeps_job_queued(engine, fake_model):
+    engine.cfg.experimental.duty_role_families = True   # "Special Projects Lead" is placed by its duties (experimental)
     fake_model.up = False
     engine.check_model()
     c, h = panel(engine)

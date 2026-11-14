@@ -24,6 +24,7 @@ def test_schedule_decisions():
 
 
 def test_scheduler_tick_never_overlaps(engine):
+    engine.cfg.experimental.schedule = True       # experimental: on as config.toml would set it
     sch = Scheduler(engine)
     sch.update(True, "07:30")
     s = engine.db.get_setting("schedule")

@@ -101,10 +101,13 @@ class Scheduler:
     def describe(self) -> dict:
         s = self.settings()
         now = datetime.now(TZ)
-        return {**s, "time": s["times"][0], "timezone": "Asia/Kolkata",
-                "next_run": next_slot(now, s["times"]).isoformat() if s["enabled"] else None}
+        allowed = bool(self.engine.cfg.experimental.schedule)
+        return {**s, "time": s["times"][0], "timezone": "Asia/Kolkata", "allowed": allowed,
+                "next_run": next_slot(now, s["times"]).isoformat() if s["enabled"] and allowed else None}
 
     def tick(self, now: datetime | None = None) -> str:
+        if not self.engine.cfg.experimental.schedule:
+            return "wait"           # experimental: never runs unless [experimental] schedule = true
         now = now or datetime.now(TZ)
         s = self.settings()
         action, slot = decide(now, s, bool(self.engine.active_runs()))

@@ -119,19 +119,26 @@ export interface ActiveRun {
   stats: Record<string, number>
 }
 export interface SweepLast { group: string; finished_at: string; scope: string; trigger: string; summary: Record<string, number> }
+/** [experimental] switches in config.toml, plus the larger model and LAN mode, which have their own settings. */
+export interface Experimental {
+  listing_sources: boolean; funding_announcements: boolean; duty_role_families: boolean; contacts: boolean; schedule: boolean; side_panel: boolean
+  escalation: boolean; lan: boolean
+}
 export interface Status {
+  experimental: Experimental
   model: ModelState
   runs: ActiveRun[]
   queue: { queued: number; running: number; failed: number }
   counts: Record<string, number>
   failures: { type: string; id: number; name: string; error: string; at: string }[]
   latestDigest: Digest | null
-  schedule: { enabled: boolean; time: string; times: string[]; next_run: string | null; last_result: string | null; timezone: string }
+  schedule: { enabled: boolean; allowed: boolean; time: string; times: string[]; next_run: string | null; last_result: string | null; timezone: string }
   sweep: { lock: { owner: string; at: string; trigger: string; scope: string } | null; last: SweepLast | null }
 }
 export interface SourceInfo {
   key: string; name: string; kind: string; group: string; url?: string; site?: string; note?: string; investor?: string; enabled: boolean
-  mode: "automatic" | "import_assisted" | "needs_setup" | "unavailable" | "off"; modeLabel: string
+  mode: "automatic" | "import_assisted" | "needs_setup" | "unavailable" | "off" | "experimental_off"; modeLabel: string
+  experimental: keyof Experimental | null
   status: { last_attempt_at: string | null; last_success_at: string | null; last_error: string | null; last_error_at: string | null }
   counts: Record<string, number | string>
 }

@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react"
 import { useStatus } from "@/App"
 import { Briefing } from "@/components/briefing"
-import { Empty, ExternalLink, FreshnessPill, LOCATION_TONE, PageHeader, Pill, Section } from "@/components/common"
+import { Empty, ExperimentalPill, ExternalLink, FreshnessPill, LOCATION_TONE, PageHeader, Pill, Section } from "@/components/common"
 import { NativeSelect } from "@/components/ui/native-select"
 import { PlayIcon, StopIcon, WarningIcon } from "@/components/icons"
 import {
@@ -88,7 +88,7 @@ function Answers() {
                 <span className="text-muted-foreground"> · {s.latest ? `${s.latest.investor ?? "investor not named"}, ${day(s.latest.announced_on)}` : ""} · {s.opening_state}</span></li>))}</ul>
           )}
         </Section>
-        <Section title="Ready to contact" aside={<a className="text-sm text-(--primary-text) underline underline-offset-2" href={href("outreach")}>Outreach</a>}>
+        <Section title="Ready to contact" aside={<span className="flex flex-wrap items-center gap-2"><ExperimentalPill /><a className="text-sm text-(--primary-text) underline underline-offset-2" href={href("outreach")}>Outreach</a></span>}>
           {out && !out.items.length ? <p className="text-sm text-muted-foreground">No drafts waiting. Mark a role Interested, and the next run finds contacts for it.</p> : (
             <ul className="flex flex-col gap-2 text-sm">{out?.items.slice(0, 3).map((o) => (
               <li key={o.id}><span className="font-medium">{o.name}</span><span className="text-muted-foreground"> · {o.company}{o.job_title ? `, for ${o.job_title}` : ""}</span></li>))}</ul>

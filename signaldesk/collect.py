@@ -32,7 +32,9 @@ def classify(p: dict, prefs: dict, families: list[str] | None = None) -> dict:
     """Rules only. `families` overrides the rule-based families (a validated model reading)."""
     loc = jobrules.classify_location(p.get("location"), p.get("workplace"), p.get("description_text"))
     salary, kind = jobrules.extract_salary(p.get("description_text"), p.get("salary_extra"))
-    fams, evidence, ambiguous = jobrules.classify_roles(p["title"], p.get("description_text"))
+    # Families from duties are experimental: unless [experimental] duty_role_families is on, the
+    # title alone decides, as in the verified first release, and nothing is sent for a model check.
+    fams, evidence, ambiguous = jobrules.classify_roles(p["title"], p.get("description_text"), use_duties=bool(prefs.get("duty_role_families")))
     if families:
         fams, ambiguous = families, False
     wanted_locs = prefs.get("locations", [])

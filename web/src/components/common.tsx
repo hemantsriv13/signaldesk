@@ -25,6 +25,20 @@ export function Pill({ tone = "neutral", children, title }: { tone?: Tone; child
   return <Badge variant={TONE[tone]} title={title} className="max-w-full truncate">{children}</Badge>
 }
 
+/** Marks a feature that is implemented but has not been checked on a real run yet (docs/STATUS.md). */
+export function ExperimentalPill() {
+  return <Pill tone="warning" title="Implemented, but not yet checked on a real run. See docs/STATUS.md.">Experimental: not yet validated</Pill>
+}
+
+/** Says why an experimental control is unavailable and exactly how to turn it on. */
+export function ExperimentalOff({ setting, what }: { setting: string; what: string }) {
+  return (
+    <p className="max-w-[75ch] text-sm text-muted-foreground">
+      {what} is off. To try it, set <code className="font-mono text-xs">{setting}</code> in config.toml and restart SignalDesk.
+    </p>
+  )
+}
+
 export function ExternalLink({ url, children, className }: { url: string | null | undefined; children: ReactNode; className?: string }) {
   if (!url) return null
   return (

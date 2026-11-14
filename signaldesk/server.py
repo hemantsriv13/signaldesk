@@ -167,7 +167,14 @@ def create_app(engine: Engine, scheduler: Scheduler | None = None) -> FastAPI:
     app.state.delivery = delivery
 
     cfg = engine.cfg
+    flags = engine.flags
     throttle = auth.Throttle()
+
+    def experimental(name: str, what: str) -> None:
+        """Refuse an experimental feature unless its [experimental] switch is on in config.toml."""
+        if not flags.get(name):
+            raise HTTPException(403, f"{what} is experimental and not yet validated. To try it, set [experimental] {name} = true "
+                                     f"in {cfg.home / 'config.toml'} and restart SignalDesk.")
     lan_hosts, lan_origins = lan_mod.allowed_hosts(cfg), lan_mod.allowed_origins(cfg)
     PUBLIC_API = ("/api/auth/login", "/api/auth/session")
 
@@ -203,6 +210,9 @@ def create_app(engine: Engine, scheduler: Scheduler | None = None) -> FastAPI:
         elif host not in LOCAL_HOSTS:
             return deny(403, "SignalDesk only answers requests addressed to this computer.", lan)
         path, write = request.url.path, request.method not in ("GET", "HEAD", "OPTIONS")
+        if path.startswith("/api/panel/") and not flags.get("side_panel"):
+            return deny(403, "The Edge side panel is experimental and not yet validated. To try it, set [experimental] side_panel = true "
+                             "in config.toml and restart SignalDesk.", lan)
         authz = request.headers.get("authorization") or ""
         request.state.session = request.state.panel = None
         if authz.lower().startswith("bearer "):
@@ -345,6 +355,7 @@ def create_app(engine: Engine, scheduler: Scheduler | None = None) -> FastAPI:
             "failures": failures,
             "latestDigest": {"id": latest["id"], "created_at": latest["created_at"], **json.loads(latest["content_json"])} if latest else None,
             "schedule": scheduler.describe(),
+            "experimental": {**flags, "escalation": bool(cfg.model.escalation_model_id), "lan": bool(cfg.lan.enabled)},
         }
 
     # ------------------------------------------------------------ jobs
@@ -750,6 +761,8 @@ def create_app(engine: Engine, scheduler: Scheduler | None = None) -> FastAPI:
     @app.post("/api/sweep")
     def start_sweep(body: SweepBody):
         trigger = body.trigger if body.trigger in ("manual", "schedule", "catch-up") else "manual"
+        if trigger != "manual":
+            experimental("schedule", "Scheduled sweeps")
         try:
             return engine.start_all(trigger=trigger, scope=body.scope)
         except ValueError as e:
@@ -760,23 +773,24 @@ def create_app(engine: Engine, scheduler: Scheduler | None = None) -> FastAPI:
         return {"active": [{"id": r["id"], "agent": r["agent"], "agentName": AGENTS[r["agent"]], "status": r["status"], "started_at": r["started_at"]}
                            for r in engine.active_runs()],
                 "lock": sweep.holder(db), "last": db.get_setting("last_sweep"), "schedule": scheduler.describe(),
-                "scopes": list(sweep.SCOPES), "sources": registry.load(db, engine.cfg.home)}
+                "scopes": list(sweep.SCOPES), "sources": registry.load(db, engine.cfg.home, flags)}
 
     @app.patch("/api/sources/registry/{key}")
     def patch_source(key: str, body: SourcePatch):
-        if not registry.get(db, engine.cfg.home, key):
+        if not registry.get(db, engine.cfg.home, key, flags):
             raise HTTPException(404, "Unknown source")
         try:
             registry.set_override(db, key, enabled=body.enabled, url=body.url)
         except ValueError as e:
             raise HTTPException(400, str(e)) from None
-        return registry.get(db, engine.cfg.home, key)
+        return registry.get(db, engine.cfg.home, key, flags)
 
     @app.post("/api/imports/listings")
     def import_listings(body: ListingImport):
-        src = registry.get(db, engine.cfg.home, body.source)
+        src = registry.get(db, engine.cfg.home, body.source, flags)
         if not src or src["group"] != "jobs" or src["kind"] == "ats":
             raise HTTPException(400, "Choose a listing source such as Wellfound.")
+        experimental("listing_sources", "Importing listings")
         try:
             res = collect.import_listings(db, engine.profiles.prefs(), source=body.source, text=body.text)
         except (ValueError, json.JSONDecodeError) as e:
@@ -790,7 +804,7 @@ def create_app(engine: Engine, scheduler: Scheduler | None = None) -> FastAPI:
         runs = {r["agent"]: r for r in db.all(
             "SELECT agent, status, started_at, finished_at FROM runs WHERE id IN (SELECT MAX(id) FROM runs WHERE agent IN ('funding_scout', 'job_scout') GROUP BY agent)")}
         sources = [{"key": x["key"], "name": x["name"], "mode": x["mode"], "modeLabel": x["modeLabel"], "error": x["status"].get("last_error"),
-                    "last_success_at": x["status"].get("last_success_at")} for x in registry.load(db, engine.cfg.home) if x.get("group") in ("funding", "jobs")]
+                    "last_success_at": x["status"].get("last_success_at")} for x in registry.load(db, engine.cfg.home, flags) if x.get("group") in ("funding", "jobs")]
         return {"running": any(r["status"] not in ("done", "done_with_errors", "failed", "cancelled") for r in runs.values()),
                 "funding_scout": runs.get("funding_scout"), "job_scout": runs.get("job_scout"), "sources": sources}
 
@@ -863,6 +877,7 @@ def create_app(engine: Engine, scheduler: Scheduler | None = None) -> FastAPI:
     # ------------------------------------------------------------ contacts and outreach
     @app.post("/api/jobs/{job_id}/contacts/discover")
     def discover_contacts(job_id: int):
+        experimental("contacts", "Contact discovery")
         job_or_404(job_id)
         try:
             res = contacts.discover_for_job(db, engine.fetcher, job_id)
@@ -877,6 +892,7 @@ def create_app(engine: Engine, scheduler: Scheduler | None = None) -> FastAPI:
 
     @app.post("/api/contacts")
     def add_contact(body: ContactBody):
+        experimental("contacts", "Contacts and drafts")
         try:
             cid = contacts.add_manual(db, job_id=body.job_id, startup_id=body.startup_id, company=body.company, name=body.name, title=body.title,
                                       profile_url=body.profile_url, evidence_url=body.evidence_url)
@@ -895,7 +911,7 @@ def create_app(engine: Engine, scheduler: Scheduler | None = None) -> FastAPI:
                       f"LEFT JOIN jobs j ON j.id = o.job_id {where} ORDER BY o.updated_at DESC LIMIT 300", args)
         counts = {r["state"]: r["n"] for r in db.all("SELECT state, COUNT(*) n FROM outreach GROUP BY state")}
         s = contacts.settings(db)
-        return {"items": rows, "counts": counts, "settings": s,
+        return {"items": rows, "counts": counts, "settings": s, "experimental": {"contacts": bool(flags.get("contacts"))},
                 "sending": {"available": engine.messaging.available, "reason": engine.messaging.reason},
                 "unresolved": db.all("SELECT c.*, j.title AS job_title FROM contacts c LEFT JOIN jobs j ON j.id = c.job_id WHERE c.status = 'unresolved' LIMIT 50")}
 
@@ -1018,11 +1034,14 @@ def create_app(engine: Engine, scheduler: Scheduler | None = None) -> FastAPI:
                           "escalation_ready": bool(esc and esc.get("ready")), "escalation_message": esc["message"] if esc else "Not configured"},
                 "limits": vars(engine.cfg.limits), "fetch": {k: v for k, v in vars(engine.cfg.fetch).items()},
                 "dataDir": str(engine.cfg.home), "configFile": str(engine.cfg.home / "config.toml"), "schedule": scheduler.describe(),
-                "server": vars(engine.cfg.server)}
+                "server": vars(engine.cfg.server),
+                "experimental": {**flags, "escalation": bool(m.escalation_model_id), "lan": bool(engine.cfg.lan.enabled)}}
 
 
     @app.put("/api/schedule")
     def put_schedule(body: ScheduleBody):
+        if body.enabled:
+            experimental("schedule", "The schedule")
         try:
             return scheduler.update(body.enabled, body.time)
         except ValueError as e:

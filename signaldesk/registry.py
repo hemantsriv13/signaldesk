@@ -19,6 +19,7 @@ Modes shown in the app:
   needs_setup        the page address has not been confirmed yet
   unavailable        the last attempt failed or found nothing recognisable (temporary)
   off                turned off
+  experimental_off   experimental and not enabled in config.toml ([experimental]); nothing runs
 """
 from __future__ import annotations
 
@@ -60,7 +61,10 @@ BUILTIN: list[dict] = [
 ]
 
 MODE_LABEL = {"automatic": "Automatic", "import_assisted": "Import-assisted", "needs_setup": "Needs setup",
-              "unavailable": "Temporarily unavailable", "off": "Off"}
+              "unavailable": "Temporarily unavailable", "off": "Off", "experimental_off": "Off in config"}
+
+# Source kinds that are implemented but not validated, and the [experimental] switch each needs.
+EXPERIMENTAL_KIND = {"import": "listing_sources", "job_listings": "listing_sources", "announcements": "funding_announcements"}
 
 
 def _file_sources(home: Path) -> list[dict]:
@@ -71,7 +75,10 @@ def _file_sources(home: Path) -> list[dict]:
     return [s for s in data.get("source", []) if isinstance(s, dict) and s.get("key")]
 
 
-def load(db: DB, home: Path) -> list[dict]:
+def load(db: DB, home: Path, flags: dict | None = None) -> list[dict]:
+    """`flags` are the [experimental] config switches. Missing means off: an experimental source
+    never runs unless its switch was passed in as true."""
+    flags = flags or {}
     merged: dict[str, dict] = {s["key"]: {"enabled": True, "url": "", **s} for s in BUILTIN}
     for s in _file_sources(home):
         merged[s["key"]] = {**merged.get(s["key"], {"enabled": True, "url": "", "group": "jobs"}), **s}
@@ -85,7 +92,8 @@ def load(db: DB, home: Path) -> list[dict]:
         st = db.one("SELECT * FROM source_status WHERE key = ?", (s["key"],)) or {}
         s = {**s, "status": {k: st.get(k) for k in ("last_attempt_at", "last_success_at", "last_error", "last_error_at")},
              "counts": json.loads(st.get("last_counts_json") or "{}")}
-        s["mode"] = mode(s)
+        s["experimental"] = EXPERIMENTAL_KIND.get(s["kind"])
+        s["mode"] = "experimental_off" if s["experimental"] and not flags.get(s["experimental"]) else mode(s)
         s["modeLabel"] = MODE_LABEL[s["mode"]]
         out.append(s)
     return out
@@ -104,8 +112,8 @@ def mode(s: dict) -> str:
     return "automatic"
 
 
-def get(db: DB, home: Path, key: str) -> dict | None:
-    return next((s for s in load(db, home) if s["key"] == key), None)
+def get(db: DB, home: Path, key: str, flags: dict | None = None) -> dict | None:
+    return next((s for s in load(db, home, flags) if s["key"] == key), None)
 
 
 def set_override(db: DB, key: str, *, enabled: bool | None = None, url: str | None = None) -> None:
