@@ -59,7 +59,7 @@ The run was started from the UI, with confirmation, after the text budget was ra
 | Excerpt-only post | Card written from the excerpt; marked excerpt only |
 | 2 saved jobs, 2 saved articles | 12/12 job quotes found; 4/6 article quotes found |
 
-**The installed 9B was not run.** Switching Colibri to 9B stops the 4B, which NextWord's tutor was using during this work. Run it later with the steps in the README ("Comparing models"). The comparison report keeps raw outputs and has an empty Human review column; automatic checks alone don't say which model is better.
+**The installed 9B was not run.** Switching Colibri to 9B stops the 4B, which NextWord's tutor was using during this work. Run it later with the steps in [HUMAN_REVIEW.md](HUMAN_REVIEW.md) §4. The comparison report keeps raw outputs and has an empty Human review column; automatic checks alone don't say which model is better.
 
 ## Human review
 

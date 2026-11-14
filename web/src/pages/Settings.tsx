@@ -114,7 +114,7 @@ export default function Settings() {
             ["Larger model for unclear cases", <span key="escalation" className="flex flex-wrap items-center gap-2">{settings.model.escalation_model_id ? `${settings.model.escalation_model_id}: ${settings.model.escalation_ready ? "ready" : settings.model.escalation_message}` : "Not configured"}<ExperimentalPill /></span>],
             ["Paid AI APIs", "None. Cloud sync is a separate optional service."],
           ]} />
-          <p className="max-w-[75ch] text-sm text-muted-foreground">Change these in {settings.configFile} and restart SignalDesk. To try the installed 9B model, see "Comparing models" in the README: it runs separately and does not switch this app's model.</p>
+          <p className="max-w-[75ch] text-sm text-muted-foreground">Change these in {settings.configFile} and restart SignalDesk. To try the installed 9B model, see docs/HUMAN_REVIEW.md, section 4: it runs separately and does not switch this app's model.</p>
         </Section>
       )}
     </div>
