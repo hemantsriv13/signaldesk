@@ -44,7 +44,8 @@ TITLE_WORDS = re.compile(r"\b(co-?founder|founder|ceo|cto|coo|chief [a-z]+ offic
                          r"director[a-z ,&]*|recruit(er|ing)[a-z ]*|talent[a-z ]*|people (partner|team|operations)|hiring manager)\b", re.I)
 NOT_A_NAME = re.compile(r"^(Our|The|This|Your|You|We|Team|Head|Chief|Senior|Lead|Product|Strategy|Operations|Founder|Co Founder|Hiring|About|Join)\b")
 BANNED = re.compile(r"huge fan|big fan|love (what|your)|i('ve| have) been (using|following)|your (amazing|incredible|inspiring)|hope this (message|email|note) finds you|"
-                    r"i came across your profile|synerg|passionate about|game[- ]changer|rockstar|ninja|thrilled to connect", re.I)
+                    r"i came across your profile|synerg|passionate about|game[- ]changer|rockstar|ninja|thrilled to connect|would love to (connect|chat)|"
+                    r"i appreciate your (work|leadership|vision)|exchange insights", re.I)
 FALSE_SELF = re.compile(r"\bI(?:'m| am| was| have been| worked as| served as)\s+(?:a |an |the )?(?:former\s+)?(product manager|\bpm\b|chief of staff|"
                         r"ml engineer|machine learning engineer|data scientist)|production (ml|machine learning)|deployed (ml|machine learning) models", re.I)
 
@@ -89,7 +90,7 @@ def from_announcement(text: str, url: str, company: str) -> list[dict]:
             names = [g for g in groups if re.fullmatch(NAME, g)]
             titles = [g for g in groups if not re.fullmatch(NAME, g)]
             for n in names:
-                p = _person(n, (titles[0] if titles else "Founder").title(), origin="announcement", evidence_url=url, evidence=m.group(0),
+                p = _person(n, (titles[0] if titles else "Founder"), origin="announcement", evidence_url=url, evidence=m.group(0),
                             why="Named as a founder in the funding announcement", rank=30)
                 if p:
                     out.append(p)
@@ -168,7 +169,7 @@ def from_team_page(fetcher: Fetcher, domain: str, company: str) -> list[dict]:
             title = re.sub(r"\s+", " ", m.group(2)).strip()
             if _other_company(title, company):
                 continue
-            p = _person(m.group(1), title.title(), origin="team_page", evidence_url=page["url"], evidence=m.group(0),
+            p = _person(m.group(1), title, origin="team_page", evidence_url=page["url"], evidence=m.group(0),
                         why=f"Listed on {company}'s own team page", rank=20 if m.group(1) in linked else 25,
                         profile_url=linked.get(m.group(1)))
             if p:
@@ -322,20 +323,61 @@ def pick_fact(profile: dict, job: dict, fit: dict | None) -> dict | None:
     return facts[0] if facts else None
 
 
+# A full stop after these is not the end of a sentence ("on time (e.g. board decks)").
+SENTENCE_END = re.compile(r"(?<!\be\.g\.)(?<!\bi\.e\.)(?<!\betc\.)(?<!\bvs\.)(?<!\bInc\.)(?<!\bLtd\.)(?<!\bNo\.)(?<=[.!?])\s+|\n+")
+CULTURE = re.compile(r"^(we|we're|our|at \w+|join|about us|why )\b|\b(we are|our (mission|culture|values))\b", re.I)
+
+
 def _sentences(text: str) -> list[str]:
-    parts = re.split(r"(?<=[.!?])\s+|\n+", text or "")
-    return [p.strip(" -•*\t") for p in parts if 25 <= len(p.strip(" -•*\t")) <= 160]
+    out = []
+    for p in SENTENCE_END.split(text or ""):
+        p = p.strip(" -•*\t")
+        if 25 <= len(p) <= 160 and p.count("(") == p.count(")"):
+            out.append(p)
+    return out
 
 
 def pick_detail(job: dict, facts: list[dict], page_text: str | None = None) -> str | None:
-    """One sentence, word for word from the posting (else the company page), about the work: a duty or
-    requirement that shares the most words with your facts. None when nothing suitable exists."""
+    """One sentence, word for word from the posting (else the company page), about the work itself: a
+    duty or requirement, not the company's description of its culture. Among those, the one that shares
+    the most words with your facts. None when nothing suitable exists."""
     fact_words = set(WORD.findall(" ".join(f["text"] for f in facts).lower()))
     for text in (job.get("description_text"), page_text):
-        cands = [s for s in _sentences(text or "") if DUTY.search(s) and not re.search(r"https?://|@|\bapply\b", s, re.I)]
+        cands = [s for s in _sentences(text or "") if DUTY.search(s) and not CULTURE.search(s)
+                 and not re.search(r"https?://|@|\bapply\b|\bbenefits?\b|\bequal opportunity\b", s, re.I)]
         if cands:
             return max(cands, key=lambda s: (len(fact_words & set(WORD.findall(s.lower()))), -abs(len(s) - 90)))
     return None
+
+
+def _short_fact(f: dict, limit: int = 120) -> str:
+    """The fact itself if short, else its opening clause (up to the first ";" or ", "), unchanged."""
+    text = _fact_line(f)
+    if len(text) <= limit:
+        return text
+    # Clause ends outside brackets ("(Business Intelligence, 2022-2025)" stays whole). Keep adding clauses
+    # until the text says what was done, not only where and when; stop at a semicolon.
+    ends, depth = [], 0
+    for i, ch in enumerate(text):
+        depth += (ch == "(") - (ch == ")")
+        if depth == 0 and (text.startswith(", ", i) or ch == ";"):
+            ends.append((i, ch == ";"))
+    best = ""
+    for i, hard in ends:
+        head = text[:i].strip()
+        if len(head) > limit:
+            break
+        best = head
+        if hard or (len(head) >= 50 and CLAIM_VERB.search(head) or re.search(r"\b(was|led|owned|built|ran|designed)\b", head)):
+            break
+    return best if len(best) >= 20 and re.search(r"\b(was|led|owned|built|ran|designed|worked|managed|delivered|developed|created)\b|\w+ed\b", best) else ""
+
+
+def _fragment(detail: str, limit: int = 110) -> str:
+    """The start of the quoted sentence, cut at a word, for a note that has no room for all of it."""
+    if len(detail) <= limit:
+        return detail
+    return detail[:limit].rsplit(" ", 1)[0].rstrip(",;:") + "…"
 
 
 def detail_for(contact: dict, job: dict) -> str:
@@ -357,17 +399,27 @@ def template_draft(contact: dict, job: dict, facts, detail: str | None = None) -
     """Built only from the role, the quoted detail and your facts, so it always passes the checks."""
     facts = _as_list(facts)
     first = contact["name"].split()[0]
-    lead = f"Hi {first}, I'm interested in the {job['title']} role at {job['employer']}."
-    fact_bit = f" {_fact_line(facts[0])}." if facts else ""
+    # The note goes to someone at the company, so it names the role, not the company; the message names both.
+    lead = f"Hi {first}, I'm interested in your {job['title']} role."
     ask = " Would you be open to a short chat?"
-    note = lead + fact_bit + ask
-    if detail:
-        stop = "" if detail.endswith((".", "!", "?")) else "."
-        quoted = lead + f' The posting mentions "{detail}"{stop}' + fact_bit + ask
-        if len(quoted) <= NOTE_LIMIT:
-            note = quoted
-    if len(note) > NOTE_LIMIT:
-        note = (lead + ask)[:NOTE_LIMIT]
+    shorts = [s for s in (_short_fact(f) for f in facts) if s]
+    # The note carries the quote and one fact when they fit in 300 characters: the whole fact, else its
+    # opening clause; the whole quote, else its start. Without room for both, the quote alone.
+    space = NOTE_LIMIT - len(lead) - len(ask)
+    fact_texts = [t for t in [_fact_line(f) for f in facts[:1]] + shorts[:1] + [_short_fact(facts[0], space // 2) if facts else ""] if t]
+
+    def build(fact_text: str) -> str | None:
+        mine = f" My background: {fact_text}." if fact_text else ""
+        if not detail:
+            return lead + mine + ask if len(lead + mine + ask) <= NOTE_LIMIT else None
+        room = space - len(mine) - len(' The posting says: "".')
+        if room < 45:                       # too little left to quote anything meaningful
+            return None
+        d = detail if len(detail) <= room else _fragment(detail, room - 1)
+        q = f' The posting says: "{d}"' + ("" if d.endswith((".", "!", "?", "…")) else ".")
+        return lead + q + mine + ask
+
+    note = next((n for n in (build(t) for t in [*fact_texts, ""]) if n and len(n) <= NOTE_LIMIT), (lead + ask)[:NOTE_LIMIT])
     lines = [f"Hi {first},", "",
              f"I'm applying for the {job['title']} role at {job['employer']} and wanted to reach out directly"
              + (f", given your role as {contact['title']}." if contact.get("title") else ".")]
@@ -424,6 +476,16 @@ def unbacked_claims(text: str, facts) -> list[str]:
     return bad
 
 
+def claims_the_job(text: str, job: dict) -> bool:
+    """"I'm an Implementation Manager at <the company>": the sender claims the role being applied for, or
+    claims to work at the company already. Seen in a local-model draft on real data."""
+    title, employer = re.escape(job["title"].lower()), re.escape(job["employer"].lower())
+    t = text.lower()
+    return bool(re.search(rf"\bi(?:'m| am)\s+(?:an?\s+|the\s+|currently\s+)?{title}\b", t)
+                or re.search(rf"\bi(?:'m| am|'ve been| have been)?\s+(?:currently\s+)?(?:work|working|employed)\b[^.\n]{{0,40}}\bat {employer}\b", t)
+                or re.search(rf"\bmy (role|work|team|time) at {employer}\b", t))
+
+
 def validate_draft(data: dict, contact: dict, job: dict, facts, detail: str | None = None) -> tuple[str, str]:
     facts = _as_list(facts)
     note, msg = str(data.get("note") or "").strip(), str(data.get("message") or "").strip()
@@ -439,6 +501,8 @@ def validate_draft(data: dict, contact: dict, job: dict, facts, detail: str | No
         problems.append("generic praise or invented familiarity")
     if FALSE_SELF.search(both):
         problems.append("claims a title or experience the profile does not support")
+    if claims_the_job(both, job):
+        problems.append("says the sender already holds this role or works at this company")
     ids = {f["id"] for f in facts}
     claims = data.get("claims") if isinstance(data.get("claims"), list) else []
     if any(not isinstance(c, dict) or c.get("fact") not in ids for c in claims):

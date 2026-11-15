@@ -154,3 +154,61 @@ def test_pasted_linkedin_address_is_stored_in_one_form_and_gets_a_draft(engine, 
     for bad in ("https://www.linkedin.com/company/quillfeather", "https://www.linkedin.com/search/results/people/?keywords=odile",
                 "http://www.linkedin.com/in/odile"):
         assert api.post("/api/contacts", json={"job_id": job["id"], "company": CO, "name": "Odile Ferncastle", "profile_url": bad}).status_code == 400
+
+
+# ---------------------------------------------------------------- seen on real postings (copy of the data), rebuilt with invented text
+def test_a_quote_is_never_cut_at_an_abbreviation():
+    job = {"title": "Analyst", "employer": CO, "description_text":
+           "You will run recurring processes and organise partners to deliver materials on time (e.g. board decks, plans).\nWe are a fun team."}
+    assert contacts.pick_detail(job, []) == "You will run recurring processes and organise partners to deliver materials on time (e.g. board decks, plans)."
+
+
+def test_culture_lines_are_not_quoted_as_the_work():
+    job = {"title": "Implementation Manager", "employer": CO, "description_text":
+           "We are an outcome-driven organisation and trust each other to drive outcomes.\n"
+           "Lead onboarding for enterprise customers and own the rollout plan with their teams."}
+    assert contacts.pick_detail(job, []).startswith("Lead onboarding")
+
+
+def test_a_note_keeps_the_quote_and_a_fact_even_when_facts_are_long():
+    long_fact = {"id": "P9", "text": "At Fixture Brewing (Business Intelligence, 2022-2025), led growth strategy for an internal analytics platform; "
+                                     "streamlined reporting for thousands of operational and financial KPIs across many markets and teams worldwide."}
+    job = {"title": "Product Manager, Agents", "employer": "Quillfeather", "description_text":
+           "Partner with engineering, design, sales, solutions, and partners to take a capability from one design partner to hundreds of customers."}
+    c = {"name": "Tamsin Orlowe", "title": "CTO"}
+    detail = contacts.pick_detail(job, [long_fact])
+    note, msg = contacts.template_draft(c, job, [long_fact], detail)
+    assert len(note) <= 300 and '"Partner with engineering' in note and "At Fixture Brewing (Business Intelligence, 2022-2025), led growth" in note
+    # With a long company name and title there is no room for both: the quote stays, the note stays within 300.
+    cramped, _ = contacts.template_draft(c, {**job, "employer": CO + " International Holdings"}, [long_fact], detail)
+    assert len(cramped) <= 300 and '"Partner with engineering' in cramped
+    assert f'"{detail}"' in msg and long_fact["text"].rstrip(".") in msg and "given your role as CTO" in msg
+    contacts.validate_draft({"note": note, "message": msg, "claims": [], "quote": detail}, c, job, [long_fact], detail)
+
+
+def test_a_shortened_fact_never_ends_inside_brackets():
+    f = {"id": "P9", "text": "At Fixture Brewing (Business Intelligence, 2022-2025), led growth strategy for an internal analytics platform used "
+                             "across many markets; streamlined reporting for thousands of KPIs."}
+    short = contacts._short_fact(f, 120)
+    assert short == "" or (short.count("(") == short.count(")") and short.startswith("At Fixture Brewing (Business Intelligence, 2022-2025), led"))
+
+
+def test_a_draft_that_claims_the_role_or_the_company_is_rejected(role):
+    """A local-model draft on real data opened "I'm an <the role> at <the company>"."""
+    job, c = role
+    facts = contacts.pick_facts(TEST_PROFILE, job, None)
+    detail = contacts.pick_detail(job, facts)
+    base = {"note": f'Hi Tamsin, the posting says "{detail}"', "claims": [], "quote": detail}
+    for msg in (f"Hi Tamsin, I'm a {job['title']} at {CO}. I built data products.",
+                f"Hi Tamsin, I currently work at {CO} and built data products.",
+                f"Hi Tamsin, I'm applying to {CO}. Would love to connect and exchange insights."):
+        with pytest.raises(ValueError):
+            contacts.validate_draft({**base, "message": msg}, c, job, facts, detail)
+    assert not contacts.claims_the_job(f"I'm applying for the {job['title']} role at {CO}.", job)
+    assert not contacts.claims_the_job(f"I'm interested in the {job['title']} role at {CO}.", job)
+
+
+def test_a_shortened_fact_says_what_was_done_not_only_where():
+    f = {"id": "P9", "text": "At Fixture Brewing (Business Intelligence, 2022-2025), was growth strategy lead for an internal analytics platform; "
+                             "streamlined reporting for thousands of KPIs across many markets and teams in every region of the business."}
+    assert contacts._short_fact(f, 120) == "At Fixture Brewing (Business Intelligence, 2022-2025), was growth strategy lead for an internal analytics platform"

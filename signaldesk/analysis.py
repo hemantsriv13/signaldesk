@@ -12,7 +12,7 @@ import re
 from .text import clip, find_quote, has_injection, sha
 
 PROMPT_VERSIONS = {"job_fit": "job-fit-v2", "reading_card": "card-v1", "case_study": "case-v1", "digest_action": "action-v1",
-                   "role_classify": "roles-v1", "funding_extract": "funding-v1", "outreach_draft": "outreach-v1"}
+                   "role_classify": "roles-v1", "funding_extract": "funding-v1", "outreach_draft": "outreach-v2"}
 
 SYSTEM = (
     "You analyse text for one person's private job-search and reading notes. "

@@ -261,7 +261,7 @@ def test_snapshot_drops_contact_fields_even_if_a_briefing_carried_them():
 def test_names_with_initials_and_department_titles_are_found(engine, boards):
     got = team(engine, boards, '<div><h3>Ravindran K S</h3><p>Co-founder and CTO</p></div>'
                                '<div><h3>Corwin Ashdale</h3><p>Co-founder, Engineering</p></div>')
-    assert {n: c["title"] for n, c in got.items()} == {"Ravindran K S": "Co-Founder And Cto", "Corwin Ashdale": "Co-Founder, Engineering"}
+    assert {n: c["title"] for n, c in got.items()} == {"Ravindran K S": "Co-founder and CTO", "Corwin Ashdale": "Co-founder, Engineering"}   # as written on the page
 
 
 def test_an_about_page_that_moved_is_still_read(engine, boards, monkeypatch):
