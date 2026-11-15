@@ -28,6 +28,7 @@ export function ago(iso: string | null | undefined): string {
 export const plural = (n: number, one: string, many = `${one}s`) => `${n.toLocaleString("en-IN")} ${n === 1 ? one : many}`
 
 export const AGENT_PAGE: Record<string, string> = {
+  project_coach: "projects",
   funding_scout: "hiring",
   job_scout: "jobs",
   reading_scout: "reading",

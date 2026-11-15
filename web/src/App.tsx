@@ -15,6 +15,7 @@ import Jobs from "@/pages/Jobs"
 import Gaps from "@/pages/Gaps"
 import Outreach from "@/pages/Outreach"
 import Pipeline from "@/pages/Pipeline"
+import Projects from "@/pages/Projects"
 import Reading from "@/pages/Reading"
 import Runs from "@/pages/Runs"
 import Saved from "@/pages/Saved"
@@ -26,6 +27,7 @@ const NAV: { page: string; label: string; icon: ReactNode }[] = [
   { page: "today", label: "Today", icon: <SunIcon /> },
   { page: "jobs", label: "Jobs", icon: <BriefcaseIcon /> },
   { page: "pipeline", label: "Pipeline", icon: <CheckCircleIcon /> },
+  { page: "projects", label: "Projects", icon: <FlaskIcon /> },
   { page: "gaps", label: "Skill gaps", icon: <FlaskIcon /> },
   { page: "hiring", label: "Hiring companies", icon: <MagnifyingGlassIcon /> },
   { page: "outreach", label: "Outreach", icon: <LinkSimpleIcon /> },
@@ -39,6 +41,7 @@ const NAV: { page: string; label: string; icon: ReactNode }[] = [
 ]
 
 const PAGES: Record<string, () => ReactNode> = {
+  projects: () => <Projects />,
   today: () => <Today />, jobs: () => <Jobs />, pipeline: () => <Pipeline />, gaps: () => <Gaps />, hiring: () => <Hiring />, funded: () => <Hiring />, outreach: () => <Outreach />, reading: () => <Reading />, cases: () => <Cases />, saved: () => <Saved />,
   runs: () => <Runs />, sources: () => <Sources />, settings: () => <Settings />, how: () => <How />,
 }
@@ -98,7 +101,7 @@ function Shell() {
   return (
     <Ctx.Provider value={{ status, error, reload }}>
       <div className="flex h-dvh min-h-0 flex-col lg:flex-row">
-        <a href="#main" className="sr-only focus:not-sr-only focus:absolute focus:left-2 focus:top-2 focus:z-50 focus:rounded focus:bg-background focus:p-2">Skip to content</a>
+        <a href="#main" className="absolute left-2 top-2 z-50 min-h-11 -translate-y-32 rounded bg-background px-4 py-3 focus:translate-y-0">Skip to content</a>
         <Sidebar className="h-auto w-full shrink-0 border-e-0 border-b lg:h-dvh lg:w-56 lg:border-e lg:border-b-0">
           <SidebarHeader className="flex flex-row items-center justify-between gap-2 px-4 py-3">
             <span className="flex items-center gap-2 font-heading text-xl font-medium"><span aria-hidden="true" className="brand-mark">s</span>SignalDesk</span>
