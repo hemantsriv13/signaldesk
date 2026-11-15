@@ -242,7 +242,7 @@ function CompanyView({ id, onChange }: { id: string; onChange: () => void }) {
                 <span className="flex flex-wrap gap-1.5">
                   {o.match && <Pill tone={o.match === "potential match" ? "success" : o.match === "not a match" ? "danger" : "neutral"}>Model: {o.match}</Pill>}
                   {o.bucket === "candidate" && !o.match && <Pill tone="success">In your target roles</Pill>}
-                  {SHORTLIST.includes(o.status) ? <Pill tone="success">{o.status === "Applied" ? "Applied" : "Shortlisted"}</Pill> : o.status !== "New" && <Pill>{o.status}</Pill>}
+                  {SHORTLIST.includes(o.status) ? <Pill tone="success">{["Interested", "Investigate"].includes(o.status) ? "Shortlisted" : o.status}</Pill> : o.status !== "New" && <Pill>{o.status}</Pill>}
                 </span>
               </div>
               {o.apply_url && (

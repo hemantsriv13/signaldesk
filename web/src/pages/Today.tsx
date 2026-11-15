@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react"
 import { useStatus } from "@/App"
 import { Briefing } from "@/components/briefing"
+import { TodaysActions } from "@/components/todays-actions"
 import { Empty, ExperimentalPill, ExternalLink, FreshnessPill, LOCATION_TONE, PageHeader, Pill, Section } from "@/components/common"
 import { NativeSelect } from "@/components/ui/native-select"
 import { PlayIcon, StopIcon, WarningIcon } from "@/components/icons"
@@ -162,6 +163,7 @@ export default function Today() {
           </NativeSelect>
           <Button onClick={() => runAll()} disabled={running || !status || status.demo}><PlayIcon className="size-4" />{running ? "Running" : "Run now"}</Button></>} />
       {message && <p role="status" className="text-sm text-(--warning-text)">{message}</p>}
+      <TodaysActions refreshKey={`${c?.matches}-${status.queue.queued}-${status.runs.length}`} />
 
       {status && (
         <section aria-label="Current state" className="grid grid-cols-1 gap-x-8 gap-y-4 border-y border-border py-4 text-sm md:grid-cols-3">

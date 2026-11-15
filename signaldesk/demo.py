@@ -122,6 +122,17 @@ def build(home: Path) -> Config:
                            company_id=companies[employer], employer=employer, source="manual", prefs=prefs, now=_ago(i % 5))
     db.run("UPDATE jobs SET last_verified_at = ?", (now_iso(),))
 
+    # A few invented applications at different stages, so the Pipeline page and Today's actions have something to show.
+    from . import pipeline
+    picks = [r["id"] for r in db.all("SELECT id FROM jobs WHERE bucket = 'candidate' ORDER BY id DESC LIMIT 5")]
+    plans = [[("Shortlisted", 16), ("Applied", 14), ("Contact made", 9), ("Reply", 2)],
+             [("Shortlisted", 12), ("Applied", 10)],
+             [("Shortlisted", 6)],
+             [("Shortlisted", 20), ("Applied", 18), ("Rejected", 5)]]
+    for jid, plan in zip(picks, plans):
+        for stage, days in plan:
+            pipeline.record(db, jid, stage, at=_ago(days)[:10], note="Demo data" if stage == "Shortlisted" else "")
+
     # Job-fit analyses for the matching jobs, saved exactly as the app saves real ones.
     for j in db.all("SELECT * FROM jobs WHERE bucket = 'candidate' ORDER BY id LIMIT 6"):
         out, val = analysis.validate_job(_fit_output(j, profile), j, profile)

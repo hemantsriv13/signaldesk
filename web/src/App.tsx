@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from "react"
 import {
-  BookmarkSimpleIcon, BookOpenIcon, BriefcaseIcon, FlaskIcon, GearIcon, LinkSimpleIcon, MagnifyingGlassIcon, MoonIcon, QuestionIcon, RobotIcon, RssIcon, SunIcon,
+  BookmarkSimpleIcon, BookOpenIcon, BriefcaseIcon, CheckCircleIcon, FlaskIcon, GearIcon, LinkSimpleIcon, MagnifyingGlassIcon, MoonIcon, QuestionIcon, RobotIcon, RssIcon, SunIcon,
 } from "@/components/icons"
 import { Button } from "@/components/ui/button"
 import { Sidebar, SidebarContent, SidebarFooter, SidebarGroup, SidebarHeader, SidebarItem } from "@/components/ui/sidebar"
@@ -13,6 +13,7 @@ import Hiring from "@/pages/Hiring"
 import How from "@/pages/How"
 import Jobs from "@/pages/Jobs"
 import Outreach from "@/pages/Outreach"
+import Pipeline from "@/pages/Pipeline"
 import Reading from "@/pages/Reading"
 import Runs from "@/pages/Runs"
 import Saved from "@/pages/Saved"
@@ -23,6 +24,7 @@ import Today from "@/pages/Today"
 const NAV: { page: string; label: string; icon: ReactNode }[] = [
   { page: "today", label: "Today", icon: <SunIcon /> },
   { page: "jobs", label: "Jobs", icon: <BriefcaseIcon /> },
+  { page: "pipeline", label: "Pipeline", icon: <CheckCircleIcon /> },
   { page: "hiring", label: "Hiring companies", icon: <MagnifyingGlassIcon /> },
   { page: "outreach", label: "Outreach", icon: <LinkSimpleIcon /> },
   { page: "reading", label: "Reading", icon: <BookOpenIcon /> },
@@ -35,7 +37,7 @@ const NAV: { page: string; label: string; icon: ReactNode }[] = [
 ]
 
 const PAGES: Record<string, () => ReactNode> = {
-  today: () => <Today />, jobs: () => <Jobs />, hiring: () => <Hiring />, funded: () => <Hiring />, outreach: () => <Outreach />, reading: () => <Reading />, cases: () => <Cases />, saved: () => <Saved />,
+  today: () => <Today />, jobs: () => <Jobs />, pipeline: () => <Pipeline />, hiring: () => <Hiring />, funded: () => <Hiring />, outreach: () => <Outreach />, reading: () => <Reading />, cases: () => <Cases />, saved: () => <Saved />,
   runs: () => <Runs />, sources: () => <Sources />, settings: () => <Settings />, how: () => <How />,
 }
 

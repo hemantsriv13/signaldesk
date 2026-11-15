@@ -12,7 +12,7 @@ import { Label } from "@/components/ui/label"
 import { NativeSelect } from "@/components/ui/native-select"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Textarea } from "@/components/ui/textarea"
-import { api, useApi, type Analysis, type Contact, type FundingEvent, type JobFit, type JobRow, type TaskRef, type Tone } from "@/lib/api"
+import { api, useApi, type Analysis, type Contact, type FundingEvent, type JobFit, type JobRow, type StageEvent, type TaskRef, type Tone } from "@/lib/api"
 import { ago, day, ROUND_LABEL, SOURCE_LABEL, when } from "@/lib/format"
 import { go, href, useRoute } from "@/lib/router"
 import { cn } from "@/lib/utils"
@@ -31,6 +31,7 @@ interface JobList {
 }
 const BAND_TONE: Record<string, Tone> = { above: "success", overlaps: "neutral", below: "warning", unknown: "neutral" }
 interface JobDetail extends JobRow {
+  stage: string | null; stages: string[]; events: StageEvent[]
   found_on: { source: string; url: string; first_seen_at: string; last_seen_at: string }[]
   contacts: Contact[]
   funding: { startup_id: number; name: string; india_link: string; india_evidence: string | null; latest: FundingEvent | null; days_since: number | null } | null
@@ -335,6 +336,8 @@ function JobView({ id, statuses, onChange }: { id: number; statuses: string[]; o
       {note && <p role="status" className="text-sm text-muted-foreground">{note}</p>}
       {j.task?.status === "failed" && <p className="text-sm text-(--destructive-text)">The last analysis failed: {j.task.error}</p>}
 
+      {/* Keyed by stage, so after you record a step the form offers the next one. */}
+      <StageSection key={`${j.id}-${j.stage}`} job={j} onChange={() => { reload(); onChange() }} />
       <ContactsSection job={j} onChange={reload} />
       <FundingSection f={j.funding} />
 
@@ -393,6 +396,52 @@ function JobView({ id, statuses, onChange }: { id: number; statuses: string[]; o
         <div className="max-w-[72ch] whitespace-pre-wrap border-t border-border p-4 leading-relaxed">{j.description_text || "The board gave no description."}</div>
       </details>
     </article>
+  )
+}
+
+// Fixed when the page loads: the server refuses future dates anyway.
+const TODAY = new Date().toISOString().slice(0, 10)
+const STAGE_HELP: Record<string, string> = {
+  Shortlisted: "You want to apply.", Applied: "Application sent.", "Contact made": "You messaged someone there.",
+  Reply: "They answered; the next move is yours.", Interview: "An interview is set or done.", Offer: "You have an offer.",
+  Rejected: "They said no.", Dropped: "You stopped pursuing it.",
+}
+
+/** Record where this application stands, with the date it happened and a note. Every step is kept. */
+function StageSection({ job, onChange }: { job: JobDetail; onChange: () => void }) {
+  const next = job.stage ? job.stages[Math.min(job.stages.indexOf(job.stage) + 1, 5)] : "Shortlisted"
+  const [stage, setStage] = useState(next)
+  const [at, setAt] = useState("")
+  const [note, setNote] = useState("")
+  const [msg, setMsg] = useState<string | null>(null)
+  const save = async (ev: React.FormEvent) => {
+    ev.preventDefault()
+    try {
+      await api.send(`/api/jobs/${job.id}/stage`, "POST", { stage, at, note })
+      setMsg(`Recorded: ${stage}${at ? ` on ${at}` : " today"}.`); setNote(""); setAt(""); onChange()
+    } catch (e) { setMsg(e instanceof Error ? e.message : String(e)) }
+  }
+  return (
+    <Section title="Application" aside={job.stage ? <Pill tone={job.stage === "Offer" ? "success" : "neutral"}>{job.stage}</Pill> : undefined}>
+      <form onSubmit={save} className="flex flex-col gap-3 rounded-lg border border-border p-3">
+        <div className="flex flex-wrap items-end gap-3">
+          <div className="flex w-44 flex-col gap-1"><Label htmlFor="stage">Move to</Label>
+            <NativeSelect id="stage" value={stage} onChange={(e) => setStage(e.target.value)}>{job.stages.map((s) => <option key={s}>{s}</option>)}</NativeSelect></div>
+          <div className="flex w-44 flex-col gap-1"><Label htmlFor="stage-at">Date</Label>
+            <Input id="stage-at" type="date" max={TODAY} value={at} onChange={(e) => setAt(e.target.value)} /></div>
+        </div>
+        <p className="text-xs text-muted-foreground">{STAGE_HELP[stage]} Leave the date empty for today.</p>
+        <div className="flex max-w-xl flex-col gap-1"><Label htmlFor="stage-note">Note (optional)</Label>
+          <Textarea id="stage-note" rows={2} value={note} onChange={(e) => setNote(e.target.value)} placeholder="Who, what was said, what comes next" /></div>
+        <Button type="submit" className="w-fit">Record {stage}</Button>
+        {msg && <p role="status" className="text-sm text-muted-foreground">{msg}</p>}
+      </form>
+      {job.events.length > 0 && (
+        <ol className="flex flex-col gap-1 text-sm">{[...job.events].reverse().map((e) => (
+          <li key={e.id}><span className="font-medium">{e.stage}</span> <span className="text-muted-foreground">· {e.dated ? day(e.at) : "date unknown"}</span>
+            {e.note && <span> · {e.note}</span>}</li>))}</ol>
+      )}
+    </Section>
   )
 }
 

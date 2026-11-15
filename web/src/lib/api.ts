@@ -238,3 +238,20 @@ export interface Card {
 }
 export interface CaseField { text: string; label: "source_fact" | "vendor_claim" | "inference" | "missing"; quote: string | null }
 export type CaseStudy = Record<string, CaseField> & { suitability: string; suitability_reason: string; injection_seen: boolean }
+
+/** The application pipeline (signaldesk/pipeline.py). Rules decide every number and action here. */
+export interface StageEvent { id: number; stage: string; at: string; note: string | null; origin: string; dated: number }
+export interface PipelineAction {
+  kind: "reply_waiting" | "interview" | "applied_no_contact" | "draft_unsent" | "apply" | "review_match"
+  job_id: number; title: string; employer: string; text: string; why: string; days?: number | null; outreach_id?: number; contact?: string
+}
+export interface PipelineItem {
+  id: number; title: string; employer: string; status: string; stage: string; apply_url: string | null; official_url: string | null
+  location_raw: string | null; last_event: { stage: string; at: string; note: string | null; dated: number } | null
+}
+export interface PipelineSummary {
+  stages: string[]; counts: Record<string, number>; reached: Record<string, number>
+  conversion: { from: string; to: string; reached: number; moved: number; rate: number | null }[]
+  median_days: Record<string, number | null>; weeks: { week_of: string; applications: number }[]
+  needs_action: (Omit<PipelineAction, "text"> & { since: string | null })[]; items: PipelineItem[]
+}
