@@ -22,7 +22,7 @@ import os
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 
-from . import analysis, collect, contacts, funding, registry, sweep
+from . import analysis, collect, contacts, funding, projects, registry, sweep
 from .config import Config
 from .db import DB, now_iso
 from .llm import LocalModel, ModelError, ModelUnavailable
@@ -40,6 +40,7 @@ AGENTS = {
     "contact_scout": "Contact Scout",
     "digest_editor": "Digest Editor",
     "source_refresh": "Source refresh",
+    "project_coach": "Project Coach",
 }
 MODEL_KINDS = ("job_fit", "reading_card", "case_study", "role_classify", "funding_extract", "outreach_draft")
 ACTIVE = ("collecting", "analysing")
@@ -197,6 +198,11 @@ class Engine:
             self._log(run_id, f"Run failed: {type(e).__name__}: {e}")
             self.db.update("runs", run_id, {"status": "failed", "finished_at": now_iso()})
             self._settle_runs()
+
+    def _collect_project_coach(self, run_id: int) -> None:
+        result = projects.prepare(self.cfg, self.db)
+        self._stat(run_id, project_tasks=len(result["tasks"]), laptop_reminders=len(result["reminders"]))
+        self._log(run_id, "Project review batch prepared by rules. No model called and no clone changed.")
 
     def _settle_runs(self) -> None:
         """Close analysing runs whose tasks have all finished, and release the sweep lock once no run

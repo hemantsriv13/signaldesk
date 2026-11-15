@@ -18,7 +18,7 @@ from pydantic import BaseModel
 
 import hmac
 
-from . import auth, collect, contacts, funding, gaps, hiring, jobrules, pipeline, registry, sweep
+from . import auth, collect, contacts, funding, gaps, hiring, jobrules, pipeline, projects, registry, sweep
 from . import lan as lan_mod
 from . import panel as panel_api
 from .cv import MAX_BYTES, preview_cv
@@ -71,6 +71,10 @@ class Generate(BaseModel):
 
 class RunBody(BaseModel):
     agent: str
+
+class ProjectResponseBody(BaseModel):
+    verdict: str
+    note: str = ""
 
 class Company(BaseModel):
     name: str
@@ -528,6 +532,35 @@ def create_app(engine: Engine, scheduler: Scheduler | None = None, delivery_env:
         except ValueError as e:
             raise HTTPException(400, str(e)) from None
         return {**res, "events": pipeline.events(db, job_id)}
+
+    @app.get("/api/projects")
+    def project_view():
+        return projects.today(db)
+
+    @app.post("/api/projects/collect")
+    def project_collect():
+        return projects.prepare(cfg, db)
+
+    @app.post("/api/projects/tasks/{task_id}/response")
+    def project_response(task_id: str, body: ProjectResponseBody):
+        try:
+            return projects.respond(db, task_id, body.verdict, body.note)
+        except ValueError as e:
+            raise HTTPException(400, str(e)) from None
+
+    @app.post("/api/projects/tasks/{task_id}/skip")
+    def project_skip(task_id: str):
+        try:
+            return projects.skip(db, task_id)
+        except ValueError as e:
+            raise HTTPException(400, str(e)) from None
+
+    @app.post("/api/projects/export")
+    def project_export():
+        try:
+            return projects.export_responses(cfg, db)
+        except (OSError, ValueError, KeyError, TypeError):
+            raise HTTPException(400, "Export could not complete safely. Check data-home access and source review formats.") from None
 
     @app.get("/api/pipeline")
     def pipeline_view():
