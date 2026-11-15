@@ -111,3 +111,13 @@ def test_clear_annual_ctc_still_compares():
 ])
 def test_onsite_location_field_not_overridden_by_team_description(location, description, expected):
     assert jobrules.classify_location(location, None, description).cls == expected
+
+
+@pytest.mark.parametrize("loc", ["Remote - California", "Remote - California; Remote - Colorado", "Remote - Texas", "Remote, NY"])
+def test_us_state_remote_roles_are_elsewhere_not_uncertain(loc):
+    """Seen on real boards: a US state instead of a city. These are not open to India."""
+    assert jobrules.classify_location(loc, "Remote").cls == "remote_other"
+
+
+def test_indiana_is_not_india():
+    assert jobrules.classify_location("Indianapolis, Indiana").cls == "other"

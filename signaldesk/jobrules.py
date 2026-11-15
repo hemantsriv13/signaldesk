@@ -16,7 +16,12 @@ OTHER_REGION = re.compile(
     r"\b(us|u\.s\.|usa|united states|canada|mexico|brazil|latam|uk|united kingdom|ireland|europe|emea|eu|germany|france|spain|"
     r"netherlands|poland|portugal|switzerland|sweden|israel|uae|dubai|singapore|japan|tokyo|korea|seoul|australia|sydney|"
     r"new zealand|philippines|vietnam|indonesia|malaysia|san francisco|new york|seattle|london|berlin|paris|amsterdam|toronto|"
-    r"austin|boston|chicago|denver|dublin|zurich|munich|tel aviv|bay area|nyc|sf)\b", re.I)
+    r"austin|boston|chicago|denver|dublin|zurich|munich|tel aviv|bay area|nyc|sf|ny|"
+    # US states, which job boards often give instead of a city ("Remote - California"). Georgia is abroad either way.
+    r"alabama|alaska|arizona|arkansas|california|colorado|connecticut|delaware|florida|georgia|hawaii|idaho|illinois|"
+    r"indiana|iowa|kansas|kentucky|louisiana|maine|maryland|massachusetts|michigan|minnesota|mississippi|missouri|montana|"
+    r"nebraska|nevada|new hampshire|new jersey|new mexico|north carolina|north dakota|ohio|oklahoma|oregon|pennsylvania|"
+    r"rhode island|south carolina|south dakota|tennessee|texas|utah|vermont|virginia|washington|west virginia|wisconsin|wyoming)\b", re.I)
 RESTRICT_LINE = re.compile(r"(must|need to|required to|should) (be )?(be )?(based|located|reside|live|work)|eligible to work in|work authori[sz]ation|right to work|time ?zone|based in|located in|open to candidates in|hiring in", re.I)
 
 
