@@ -37,19 +37,24 @@ of these carries the label **Experimental: not yet validated**.
 | Portfolio discovery: YC India, WestBridge portfolio | verified | README V3 table: tested live on a copy, 50 YC + 12 WestBridge companies |
 | Automatic checks on 4B model output | verified | EVALUATION.md §3: 12 of 12 items valid |
 | **Human review of job-fit judgements** | not done | Kit ready: [HUMAN_REVIEW.md](HUMAN_REVIEW.md) (`python -m eval.review export`, then `score`). EVALUATION.md "Human review" is blank |
-| 9B model comparison | not run | EVALUATION.md §3; commands in [HUMAN_REVIEW.md](HUMAN_REVIEW.md) §4 |
+| 9B model comparison | run, not judged | EVALUATION.md §4: 9B valid 23 of 28 vs 4B 28 of 28, 14 times slower; which is better needs your review ([HUMAN_REVIEW.md](HUMAN_REVIEW.md)) |
 | Wellfound import and YC jobs (`listing_sources`) | experimental, off | Set the switch, restart, import a saved Wellfound list under Sources → Discovery sources, and run `python -m signaldesk sweep --scope jobs`. Check that listings match employer boards and unmatched ones stay "Not yet on employer's board" |
 | Investor announcement pages: WestBridge, Accel, Peak XV, Lightspeed (`funding_announcements`) | experimental, off | Set the switch, add a confirmed page address in Sources, run `python -m signaldesk sweep --scope funding`, and compare the dated rounds with the announcement pages |
 | Role families from duties, and model checks of unclear titles (`duty_role_families`) | experimental, off | Set the switch, run a jobs sweep, and check placements against the postings, especially "Special Projects" roles and sales roles that mention strategy. Off means families come from the title, as in the verified first release |
 | Location groups and pay bands | experimental, not switched | Code runs on every job (no switch; turning it off would change the Jobs page). Verify by checking Jobs filters against a sample of real postings |
 | Run now with a scope, and the lock shared across processes | experimental, not switched | Run now from Today while `python -m signaldesk sweep` runs in a second window; the second should report the sweep already running |
-| Contacts and outreach drafts (`contacts`) | experimental, off | Set the switch, mark a job Interested, choose Find contacts, and check that every person's page names them and no profile link was guessed. Fixture tests: `pytest tests/test_contacts.py -rxX`. **Known failure (not fixed):** on a company team page, a LinkedIn link can be stored on the wrong person, and names like "Corwin Ashdale Co" are made from neighbouring text; the two `xfail` tests show it |
+| Contacts and outreach drafts (`contacts`) | experimental, off | Ran on 10 real shortlisted roles on a copy (EVALUATION.md §4): people found for 4; awaiting your review of each person and draft. The team-page failures are fixed (`pytest tests/test_contacts.py`). Drafts are templates: local models passed 0 of 22 |
 | Automatic sending of messages | not available | No authorised messaging integration exists |
 | 08:00/20:00 schedule and Windows task (`schedule`) | experimental, off | Set the switch, then `powershell -ExecutionPolicy Bypass -File scripts\schedule-install.ps1` and `Start-ScheduledTask -TaskPath '\SignalDesk\' -TaskName 'SignalDesk sweep 0800'`; remove with `scripts\schedule-remove.ps1` |
 | Larger-model escalation and replay comparison | experimental, off | Set `[model] escalation_model_id`, then `python -m eval.run_eval replay --label small`, switch Colibri, `replay --label large --model-id ID`, `replay-report A B` ([V3_SETUP.md](V3_SETUP.md)) |
 | LAN mode (phone on your Wi-Fi) | experimental, off | The acceptance checks in [LAN_AND_PANEL.md](LAN_AND_PANEL.md) §6, all unverified |
 | Edge side panel (`side_panel`) | experimental, off | Set the switch, then LAN_AND_PANEL.md §4 step 4 and the last three rows of §6 |
 | Demo mode (`python -m signaldesk --demo`) | verified offline | `pytest tests/test_demo.py`: no network or model requests (socket-level guard), refusals for every collection and model action. Rendered once in Chrome on this laptop; screenshots not yet taken |
+| Application pipeline, Pipeline page, Today's actions, stage form | built, tested | `pytest tests/test_pipeline.py`; seen working on demo data in the browser; on the copy the migration kept all statuses. Not yet used on a real application |
+| Mark sent, day-5/day-12 follow-ups, LinkedIn URL entry | built, tested | `pytest tests/test_outreach.py`; not used on real data; not checked in browser |
+| Skill gaps and Lead with | built, tested | `pytest tests/test_gaps.py`; grouping ran on the copy (25 roles, top requirement in 3); not checked in browser |
+| 4B at 4096 or 8192 context | measured, not adopted | EVALUATION.md §4: both work; 4096 recommended; config unchanged |
+| Overnight batch mode | design only | [OVERNIGHT_BATCH.md](OVERNIGHT_BATCH.md) |
 
 ## Optional parts
 

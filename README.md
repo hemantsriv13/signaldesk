@@ -2,7 +2,26 @@
 
 [![CI](https://github.com/hemantsriv13/signaldesk/actions/workflows/ci.yml/badge.svg)](https://github.com/hemantsriv13/signaldesk/actions/workflows/ci.yml)
 
-A personal job-search and AI-reading desk that runs on one Windows laptop. It:
+A personal job-search and AI-reading desk that runs on one Windows laptop.
+
+## What this does for a job search
+
+Each day it finds open Bengaluru and India-remote roles on employers' own boards, says which ones fit
+your profile and why, and lists at most five concrete actions: reply, follow up, send a drafted note,
+apply to a shortlisted role, or decide on a new match. The Pipeline page tracks every application.
+
+| Since you started | Number |
+|---|---|
+| Roles shortlisted | _fill in_ |
+| Applications sent | _fill in_ |
+| People contacted | _fill in_ |
+| Replies | _fill in_ |
+| Interviews | _fill in_ |
+| Offers | _fill in_ |
+
+## In short
+
+It:
 
 - finds relevant jobs on employers' own job boards, so you apply on their sites;
 - follows selected Substack newsletters and AI engineering blogs;
@@ -49,20 +68,28 @@ profile version; change any of these and the item is analysed again on the next 
 
 ## What is verified
 
-[docs/STATUS.md](docs/STATUS.md) lists every feature as **verified** (with the record of how it was
-checked) or **experimental** (with the commands that would verify it). In short:
+Verified means it was run for real and the result recorded; the last column says how. Details and the
+commands that would verify the rest: [docs/STATUS.md](docs/STATUS.md).
 
-- Verified on real runs: job boards and feeds, the rules, the model queue and its analyses, briefings,
-  the desktop interface, CV matching, cloud sync and the Android reader.
-- Not yet done: **your own review of the job-fit judgements** ([HUMAN_REVIEW.md](docs/HUMAN_REVIEW.md))
-  and the 9B model comparison.
-- Experimental and **off by default**: Wellfound/YC import, investor announcement pages, role families
-  from duties, contacts and drafts, the 08:00/20:00 schedule and Windows task, larger-model escalation,
-  LAN mode and the Edge side panel. Each needs a switch in `config.toml` (`[experimental]`), and the
-  app labels it "Experimental: not yet validated".
+| Version | Feature | Status | How it was checked |
+|---|---|---|---|
+| V1 | Job boards, feeds, rules, model queue, fit analyses, briefings | Verified | Live runs 2026-11-02 ([EVALUATION.md](docs/EVALUATION.md) §2) |
+| V1 | Your review of the job-fit judgements | Not done | Kit ready ([HUMAN_REVIEW.md](docs/HUMAN_REVIEW.md)) |
+| V2 | Desktop interface, careers-page discovery, CV matching | Verified | Real pages and a real model run ([V2_VALIDATION.md](docs/V2_VALIDATION.md)) |
+| V2 | Cloud reader and Android app (optional) | Verified | `verify_cloud.py` on the live project; owner on a real phone |
+| V3 | Hiring companies, YC India and WestBridge portfolios | Verified | Runs on a copy of the data ([V3_VALIDATION.md](docs/V3_VALIDATION.md)) |
+| V3 | Location groups, Run now and the shared lock | Verified | Runs on a copy of the data, after fixes (V3_VALIDATION.md) |
+| V3 | Role families from duties | Experimental, off | Ran on a copy: about half the model's placements were wrong; model-placed roles now go to To review |
+| V3 | YC jobs, Wellfound import, investor announcements | Experimental, off | YC: engineering roles only, parser faults. Wellfound and announcements: not run |
+| V3 | Pay bands | Experimental | Ran on a copy, but only USD pay was disclosed, so INR bands are unchecked |
+| V3 | Contacts and drafts | Experimental, off | 10 real roles: people found for 4, not yet reviewed by you; drafts are templates (local models passed 0 of 22) |
+| V3 | Schedule and Windows task, escalation, LAN mode, side panel | Experimental, off | Not run |
+| V4 | Pipeline, Today's actions, stage form, Mark sent, follow-ups | Built, tested | 295 mocked tests; pipeline ran on demo data in the browser; Mark sent and follow-ups not used on real data |
+| V4 | Skill gaps and Lead with | Built, tested | Mocked tests; grouping ran on the copy (25 roles); not checked in browser |
+| V4 | Demo mode (`--demo`) | Verified offline | `tests/test_demo.py`: no network or model requests |
 
-Tests: 242 mocked tests pass (plus 2 recorded known failures in contact discovery; see STATUS.md), and
-the deterministic evaluation passes all 19 hand-written cases. CI runs both, and the web checks, on every push.
+Tests: 295 mocked tests pass, and the deterministic evaluation passes all 19 cases. CI runs both, and
+the web checks, on every push.
 
 ## Quick start (Windows)
 

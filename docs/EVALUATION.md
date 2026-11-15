@@ -61,6 +61,46 @@ The run was started from the UI, with confirmation, after the text budget was ra
 
 **The installed 9B was not run.** Switching Colibri to 9B stops the 4B, which NextWord's tutor was using during this work. Run it later with the steps in [HUMAN_REVIEW.md](HUMAN_REVIEW.md) §4. The comparison report keeps raw outputs and has an empty Human review column; automatic checks alone don't say which model is better.
 
+## 4. V4 work on a copy of the data (2026-11-15)
+
+All runs below used `D:\LocalAI\signaldesk-v4-copy`, a copy of the live data folder without cloud
+settings; the live folder was not used. Counts only; no person, profile or posting text.
+
+- **Tests:** 295 mocked tests pass (206 at the start of the cleanup branch); 19 evaluation cases pass.
+- **V3 validation:** see [V3_VALIDATION.md](V3_VALIDATION.md). Funding and full sweeps ran with 0
+  failed sources; three bugs were fixed (BOM in config.toml, a second process breaking a live sweep,
+  US states classed "uncertain").
+- **Contact discovery on 10 shortlisted roles:** people found for 4 roles at 3 companies (6 people), all
+  from the companies' own about pages; 6 roles found nobody. Not yet reviewed by the owner.
+- **Outreach drafts, local model:** 0 of 11 4B drafts and 0 of 11 9B drafts (3 attempts each) passed
+  the draft checks. Commonest 9B reasons: posting sentence not quoted (9), title claims (6), generic
+  praise (3), claiming the role or company (3), claims not backed by a fact (3). Templates are used.
+- **4B context size** (RTX 3060 Laptop, 6 GB; 1.2-1.3 GB used by other programs):
+
+  | Context | Fullest prompt tested | Total time | Generation | GPU memory, peak | Failures |
+  |---|---|---|---|---|---|
+  | 2048 (current) | 920 tokens | 4.1 s | 55 tokens/s | 4.3 GB | 0 |
+  | 4096 | 3,760 tokens | 8.0 s | 51-58 tokens/s | 5.2-5.3 GB | 0 |
+  | 8192 | 7,783 tokens | 10.3 s | 44-46 tokens/s | 5.7 GB | 0 |
+
+  Recommendation: 4096 with `prompt_char_budget` about 12000. 8192 works but leaves about 0.45 GB of
+  GPU memory, which other programs can take. Not changed: the shared launcher fixes `--ctx 2048`.
+- **4B vs 9B, `eval.run_eval model --saved 10`** (same 28 items): 4B 28 of 28 valid in 122 s; 9B 23 of 28
+  valid in 1,660 s (about 14 times slower). The 9B's 5 failures were reading cards with broken JSON.
+  Job-fit quotes found: 4B 41 of 45, 9B 67 of 69 (the 9B quotes more). Labels: 4B 7 potential, 2 weak,
+  3 not a match, 1 unknown; 9B 7 potential, 6 weak. The 9B labelled the posting with injected
+  instructions a potential match; the 4B did not this time. Automatic checks do not say which is right.
+  Report: `<data dir>\evals\compare-qwen3-4b-instruct-2507-q4km-vs-qwen3.5-9b-q4km.md` (copy).
+
 ## Human review
 
-Not done. Use the kit in [HUMAN_REVIEW.md](HUMAN_REVIEW.md): export a sheet, fill in your verdicts, score it, and record the counts here.
+Not done. To complete it, read these (all in `D:\LocalAI\signaldesk-v4-copy\evals` unless noted):
+1. A review sheet of job-fit analyses for both models:
+   `.venv\Scripts\python -m eval.review export --no-saved --run <model-qwen3-4b-...-20261115-221553.json> --run <model-qwen3.5-9b-q4km-20261115-230925.json>`
+   then fill it in and score it ([HUMAN_REVIEW.md](HUMAN_REVIEW.md)).
+2. `compare-qwen3-4b-instruct-2507-q4km-vs-qwen3.5-9b-q4km.md`, beside the sheet.
+3. The 10 shortlisted roles' contacts and drafts on the copy (Pipeline page, then each role's Who to
+   contact), to judge whether each person is right and each draft is usable.
+4. `drafts-9b.json`: why each 9B draft was rejected.
+
+Record the counts and your judgement here.
