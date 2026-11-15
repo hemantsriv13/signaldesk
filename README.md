@@ -52,7 +52,7 @@ model through Colibri. No paid model API is used and there is no cloud model fal
  FastAPI on 127.0.0.1:8780 ──► React web app (list/detail views, light and dark)
 ```
 
-**Four agents share one model.** An agent here is ordinary code with a bounded job, not an autonomous browser.
+**Five core agents.** An agent here is ordinary code with a bounded job, not an autonomous browser.
 
 | Agent | Collects (no model) | Asks the model for |
 |---|---|---|
@@ -60,6 +60,7 @@ model through Colibri. No paid model API is used and there is no cloud model fal
 | Reading Scout | RSS/Atom feeds. Full text, excerpt or title only; syndicated repeats are linked, not counted twice. | Main argument, evidence with quotes, why it may matter, limits, one concept. |
 | Case Study Analyst | Full-text articles that describe a deployment, or a public URL you paste. | Problem owner, workflow, bottleneck, AI's part, ordinary software's part, data, failure modes, impact evidence, lesson, experiment. Each point is labelled source fact, vendor claim, inference or missing. |
 | Digest Editor | Up to 3 jobs, 1 case study, 2 articles and 1 term, none repeated from recent briefings. Rechecks a chosen job's board if it wasn't verified in the last 12 hours. | One suggested action, which must point at a briefing item. If the model is unavailable, a fixed rule writes it and the briefing says so. |
+| Project Coach | Read-only Git metadata and outstanding human reviews from configured local projects. Persists up to 3 reviews and 3 laptop reminders each day. | Nothing: rules select tasks and templates explain them. Your verdicts stay in SignalDesk until exported to its data folder. |
 
 The queue sends one model request at a time and survives restarts. A failing task is retried up to 3
 times, with less text each time. If the model server is down or serving another model, tasks wait
@@ -117,6 +118,12 @@ scripts\test.cmd                                 :: mocked tests + deterministic
 ```
 
 ## Safety rules built in
+
+Project Coach's laptop-only Projects page is documented in [PROJECT_COACH.md](docs/PROJECT_COACH.md).
+Configure `[[project]]` entries from `config.example.toml`, then prepare a daily batch on that page.
+The CLI requires an explicit data home: `python -m signaldesk.projects collect --home <copied-data-home>`
+and `python -m signaldesk.projects export --home <copied-data-home>`. Exports never modify sibling clones.
+Cloud tasks, the phone Projects tab and notifications are not implemented yet.
 
 - **This computer only, by default.** The app binds to 127.0.0.1, refuses other Host names, and
   accepts changes only from its own pages. Optional LAN mode (experimental, off) adds one signed-in
