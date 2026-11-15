@@ -1,8 +1,8 @@
-# Handoff (updated 2026-11-15, end of phase 3)
+# Handoff (updated 2026-11-15, end of phase 4)
 
 Branch `v4-outcomes`, based on `cleanup/verified-core` (neither merged or pushed). Work only on the
 data copy `D:\LocalAI\signaldesk-v4-copy` (no delivery.env, port 8792, V3 switches on in its config.toml).
-Live data `D:\LocalAI\signaldesk` is untouched. Tests: 292 passed, 0 known failures.
+Live data `D:\LocalAI\signaldesk` is untouched. Tests: 295 passed, 0 known failures.
 
 ## Done
 - Phase 1 (V3 validation on the copy): record in docs/V3_VALIDATION.md. Fixed: BOM in config.toml,
@@ -14,11 +14,13 @@ Live data `D:\LocalAI\signaldesk` is untouched. Tests: 292 passed, 0 known failu
   home-page redirects, customer quotes, job-board hosts). Drafts quote one posting sentence and use at
   most two profile facts; claims about you must map to a fact; drafts claiming the role/company are
   rejected. Mark sent with date, day-5/day-12 follow-ups (migration 4), LinkedIn URL entry.
+- Phase 4: signaldesk/gaps.py, Skill gaps page, Lead with per job (accept = this job's drafts only,
+  profile not rewritten). On the copy: 25 roles, top requirement recurs in only 3 (wording varies).
 
 ## Unverified
 - Contact discovery: owner has NOT reviewed the 10-role results; do not mark it working.
 - Mark sent and follow-ups: fixture tests only, not used on the copy. New UI: not checked in browser.
-- Spacing never measured; dashboard review skipped by owner.
+- Phase 4 UI not checked in browser. Spacing never measured; dashboard review skipped by owner.
 - Wellfound import, Windows schedule task, larger-model escalation: not run.
 - Model drafts: 0 of 11 accepted by the checks on real roles (4B).
 
@@ -26,13 +28,11 @@ Live data `D:\LocalAI\signaldesk` is untouched. Tests: 292 passed, 0 known failu
 1. Verdict on the 10-role contacts and drafts.
 2. Delete the 2 wrong Stripe contacts (customer quotes from 13 Nov) on the copy? Ask first.
 3. Stop model drafts (template only) or keep for the 9B comparison in phase 5?
-4. Start phase 4 (gaps and what to lead with).
+4. Phase 5 needs model/context restarts: owner approval asked, not yet given.
 
 ## Remaining phases (from the brief)
-- 4: aggregate gaps/essential requirements in target families; lead-with suggestions from existing
-  facts (accept/reject); link gaps to reading queue.
-- 5: measure 4B at 4096/8192 context (no config change); 4B vs 9B via eval.run_eval compare (ask
-  before switching model); overnight batch mode design only, show before building.
+- 5: measure 4B at 4096/8192 context (no config change); 4B vs 9B via eval.run_eval compare; the 11
+  rejected 4B drafts through the 9B (escalation path, same checks); overnight batch: design only.
 - Housekeeping: three .patch files (confirm applied, ask before removing); README status table V1-V4
   with test count and placeholders; fill docs/EVALUATION.md, list outputs for human review.
 
