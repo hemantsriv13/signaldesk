@@ -24,6 +24,7 @@ const SORTS: Record<string, string> = { first_seen: "First seen", published: "Pu
 const UNCERTAIN = new Set(["remote_unclear", "india_unspecified", "unknown"])
 const CITY = /\b(bengaluru|bangalore|mumbai|delhi|new delhi|gurugram|gurgaon|noida|hyderabad|pune|chennai|kolkata|ahmedabad)\b/gi
 const SHORTLISTED = ["Interested", "Investigate"]
+const TRIAGE = ["New", "Not relevant", "Archived"]           // statuses outside the pipeline
 
 interface JobList {
   jobs: (JobRow & { workplace_raw: string | null })[]; counts: Record<string, number>; statuses: string[]; locationLabels: Record<string, string>
@@ -212,7 +213,7 @@ export default function Jobs() {
             })}
           </ul>
         )}
-        detail={route.id ? <JobView id={route.id} statuses={data?.statuses ?? []} onChange={reload} /> : <Empty title="Select a job" line="Its fit, what to check, and how to apply open here." />} />
+        detail={route.id ? <JobView id={route.id} onChange={reload} /> : <Empty title="Select a job" line="Its fit, what to check, and how to apply open here." />} />
       {allNew && jobs.length > 1 && <p className={cn("text-xs text-muted-foreground", route.id && "hidden lg:block")}>Every job shown is new since your last review{oneLocation ? `, all in ${data?.locationLabels[jobs[0].location_class]}` : ""}, so those labels are not repeated on each row.</p>}
       <ImportDialog open={importing} onOpenChange={setImporting} onDone={(id) => { reload(); go("jobs", id, params) }} />
     </div>
@@ -220,7 +221,7 @@ export default function Jobs() {
 }
 
 // ------------------------------------------------------------------ detail
-function JobView({ id, statuses, onChange }: { id: number; statuses: string[]; onChange: () => void }) {
+function JobView({ id, onChange }: { id: number; onChange: () => void }) {
   const { data: j, reload } = useApi<JobDetail>(`/api/jobs/${id}`)
   const [note, setNote] = useState<string | null>(null)
   const demo = !!useStatus().status?.demo
@@ -273,9 +274,11 @@ function JobView({ id, statuses, onChange }: { id: number; statuses: string[]; o
               className="inline-flex min-h-11 items-center gap-2 rounded-lg bg-primary px-4 font-medium text-primary-foreground hover:bg-(--primary-hover) focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background">
               Apply on employer site<ArrowSquareOutIcon className="size-4" aria-hidden /><span className="sr-only">(opens in a new tab)</span>
             </a>)}
-          <Button variant="outline" className="min-h-11" onClick={toggleShortlist} aria-pressed={shortlisted}>
-            {shortlisted ? <><CheckCircleIcon className="size-4" />Shortlisted</> : <><BookmarkSimpleIcon className="size-4" />Shortlist</>}
-          </Button>
+          {/* Only before or at Shortlisted: past that, the Application section moves the role on. */}
+          {(!j.stage || j.stage === "Shortlisted") && (
+            <Button variant="outline" className="min-h-11" onClick={toggleShortlist} aria-pressed={shortlisted}>
+              {shortlisted ? <><CheckCircleIcon className="size-4" />Shortlisted</> : <><BookmarkSimpleIcon className="size-4" />Shortlist</>}
+            </Button>)}
           {j.official_url && j.official_url !== j.apply_url && <ExternalLink url={j.official_url} className="ms-1">Original listing</ExternalLink>}
         </div>
         <div className="flex flex-wrap gap-1.5">
@@ -328,8 +331,10 @@ function JobView({ id, statuses, onChange }: { id: number; statuses: string[]; o
 
       {/* Everyday actions. */}
       <div className="flex flex-wrap items-end gap-3">
-        <div className="flex w-44 flex-col gap-1"><Label htmlFor="status">Your status</Label>
-          <NativeSelect id="status" value={j.status} onChange={(e) => setStatus(e.target.value)}>{statuses.map((s) => <option key={s}>{s}</option>)}</NativeSelect></div>
+        {/* Before the pipeline only; once shortlisted, the Application section records every step. */}
+        {!j.stage && (
+          <div className="flex w-44 flex-col gap-1"><Label htmlFor="status">Your status</Label>
+            <NativeSelect id="status" value={j.status} onChange={(e) => setStatus(e.target.value)}>{TRIAGE.map((s) => <option key={s}>{s}</option>)}</NativeSelect></div>)}
         <Button variant="outline" onClick={analyse} disabled={!!waiting || demo}>{j.fit ? (j.fit.outdated ? "Re-analyse (outdated)" : "Analyse again") : "Analyse fit"}</Button>
         <Button variant="ghost" onClick={recheck} disabled={demo}><ArrowClockwiseIcon className="size-4" />Recheck listing</Button>
       </div>
