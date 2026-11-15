@@ -130,6 +130,9 @@ class RevokeBody(BaseModel):
 class PanelTokenBody(BaseModel):
     label: str = "Edge side panel"
 
+class SentBody(BaseModel):
+    at: str = ""             # YYYY-MM-DD you sent it; empty means today
+
 class OutreachSettings(BaseModel):
     autosend: bool | None = None
     daily_cap: int | None = None
@@ -492,6 +495,9 @@ def create_app(engine: Engine, scheduler: Scheduler | None = None, delivery_env:
         found_on = db.all("SELECT source, url, first_seen_at, last_seen_at FROM job_sources WHERE job_id = ? ORDER BY first_seen_at", (job_id,))
         people = db.all("SELECT c.*, o.id AS outreach_id, o.state, o.note_text, o.message_text, o.drafted_by, o.sent_at, o.updated_at "
                         "FROM contacts c LEFT JOIN outreach o ON o.contact_id = c.id WHERE c.job_id = ? ORDER BY c.rank, c.id", (job_id,))
+        for p in people:
+            p["followups"] = db.all("SELECT id, n, due_on, text, state, sent_at FROM outreach_followups WHERE outreach_id = ? ORDER BY n",
+                                    (p["outreach_id"],)) if p.get("outreach_id") else []
         return {**j, "company": company, "versions": versions, "duplicates": dups, "found_on": found_on, "contacts": people,
                 "funding": funding.for_job(db, j), "role_evidence_list": json.loads(j.get("role_evidence") or "[]"),
                 "fit": engine.latest("job_fit", "job", job_id), "task": pending("job_fit", job_id),
@@ -950,6 +956,9 @@ def create_app(engine: Engine, scheduler: Scheduler | None = None, delivery_env:
         rows = db.all(f"SELECT o.*, c.name, c.title AS contact_title, c.company, c.profile_url, c.evidence_url, c.why, c.status AS contact_status, "
                       f"c.verified_at, c.origin, j.title AS job_title, j.apply_url FROM outreach o JOIN contacts c ON c.id = o.contact_id "
                       f"LEFT JOIN jobs j ON j.id = o.job_id {where} ORDER BY o.updated_at DESC LIMIT 300", args)
+        for r in rows:
+            r["followups"] = db.all("SELECT id, n, due_on, text, state, sent_at FROM outreach_followups WHERE outreach_id = ? ORDER BY n", (r["id"],))
+            r["detail"] = json.loads(r.get("inputs_json") or "{}").get("detail")
         counts = {r["state"]: r["n"] for r in db.all("SELECT state, COUNT(*) n FROM outreach GROUP BY state")}
         s = contacts.settings(db)
         return {"items": rows, "counts": counts, "settings": s, "experimental": {"contacts": bool(flags.get("contacts"))},
@@ -957,16 +966,19 @@ def create_app(engine: Engine, scheduler: Scheduler | None = None, delivery_env:
                 "unresolved": db.all("SELECT c.*, j.title AS job_title FROM contacts c LEFT JOIN jobs j ON j.id = c.job_id WHERE c.status = 'unresolved' LIMIT 50")}
 
     @app.post("/api/outreach/{oid}/contacted")
-    def mark_contacted(oid: int):
-        o = db.one("SELECT * FROM outreach WHERE id = ?", (oid,))
-        if not o:
-            raise HTTPException(404, "Not found")
-        if o["state"] in ("sent", "contacted"):
-            return {"state": o["state"]}
-        db.update("outreach", oid, {"state": "contacted", "updated_at": now_iso(), "sent_at": o["sent_at"] or now_iso()})
-        if o["job_id"]:
-            pipeline.record(db, o["job_id"], "Contact made", origin="outreach", advance_only=True)
-        return {"state": "contacted"}
+    def mark_contacted(oid: int, body: SentBody | None = None):
+        """Mark sent: you sent it yourself, on the date given (default today)."""
+        try:
+            return contacts.mark_sent(db, oid, (body.at if body else "") or None)
+        except ValueError as e:
+            raise HTTPException(404 if "not found" in str(e) else 400, str(e)) from None
+
+    @app.post("/api/outreach/followups/{fid}/sent")
+    def followup_sent(fid: int, body: SentBody | None = None):
+        try:
+            return contacts.mark_followup_sent(db, fid, (body.at if body else "") or None)
+        except ValueError as e:
+            raise HTTPException(404 if "not found" in str(e) else 400, str(e)) from None
 
     @app.put("/api/outreach/settings")
     def outreach_settings(body: OutreachSettings):

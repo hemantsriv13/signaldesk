@@ -51,7 +51,8 @@ def test_migration_keeps_statuses_and_marks_old_dates_unknown(tmp_path):
     assert [db.scalar("SELECT status FROM jobs WHERE id = ?", (j,)) for j in (a, b, c)] == ["Interested", "Applied", "Not relevant"]
     evs = {(r["job_id"], r["stage"], r["dated"]) for r in db.all("SELECT job_id, stage, dated FROM job_events")}
     assert evs == {(a, "Shortlisted", 0), (b, "Applied", 0), (b, "Contact made", 1)}
-    assert sqlite3.connect(path).execute("PRAGMA user_version").fetchone()[0] == 3
+    from signaldesk.db import MIGRATIONS
+    assert sqlite3.connect(path).execute("PRAGMA user_version").fetchone()[0] == len(MIGRATIONS)
 
 
 # ---------------------------------------------------------------- stage moves

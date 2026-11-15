@@ -406,7 +406,26 @@ def _migrate_pipeline(conn: sqlite3.Connection) -> None:
                      (job_id, sent, now))
 
 
-MIGRATIONS = [_migrate_v3, _migrate_v4, _migrate_pipeline]
+FOLLOWUP_TABLES = """
+CREATE TABLE IF NOT EXISTS outreach_followups (
+  id INTEGER PRIMARY KEY,
+  outreach_id INTEGER NOT NULL REFERENCES outreach(id),
+  n INTEGER NOT NULL,                -- 1: day 5 after the first message, 2: day 12
+  due_on TEXT NOT NULL,              -- YYYY-MM-DD
+  text TEXT NOT NULL,
+  state TEXT NOT NULL DEFAULT 'drafted',   -- drafted | sent | skipped
+  sent_at TEXT,
+  created_at TEXT NOT NULL,
+  UNIQUE(outreach_id, n)
+);
+"""
+
+
+def _migrate_followups(conn: sqlite3.Connection) -> None:
+    conn.executescript(FOLLOWUP_TABLES)
+
+
+MIGRATIONS = [_migrate_v3, _migrate_v4, _migrate_pipeline, _migrate_followups]
 
 
 class DB:

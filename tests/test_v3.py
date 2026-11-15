@@ -269,18 +269,20 @@ def test_model_draft_is_checked_before_it_replaces_the_template(engine, boards, 
     job_id = _job_with_named_manager(engine, boards)
     cid = contacts.discover_for_job(db, engine.fetcher, job_id)["contact_ids"][0]
     contacts.ensure_draft(db, cid, engine.profiles.profile(), None)
-    fact = contacts.pick_fact(engine.profiles.profile(), db.one("SELECT * FROM jobs WHERE id = ?", (job_id,)), None)
+    job = db.one("SELECT * FROM jobs WHERE id = ?", (job_id,))
+    fact = contacts.pick_facts(engine.profiles.profile(), job, None)[0]
+    detail = contacts.pick_detail(job, [fact])
     fake_model.replies["Write a LinkedIn connection note"] = {
-        "note": "Hi Meera, I saw the Strategy Manager role at Synthetic Startup E (fixture) and would value a short chat.",
+        "note": f'Hi Meera, I saw the Strategy Manager role at Synthetic Startup E (fixture): "{detail}" Would you be open to a short chat?',
         "message": "Hi Meera, I'm applying for the Strategy Manager role at Synthetic Startup E (fixture). " + fact["text"],
-        "detail_used": "D1", "fact_used": fact["id"], "injection_seen": False}
+        "claims": [{"text": fact["text"], "fact": fact["id"]}], "quote": detail, "injection_seen": False}
     assert engine.analyse("outreach_draft", cid) == "queued"
     drain(engine)
     o = db.one("SELECT * FROM outreach WHERE contact_id = ?", (cid,))
     assert o["drafted_by"] == "model" and "Synthetic Startup E" in o["message_text"]
     with pytest.raises(ValueError):
-        contacts.validate_draft({"note": "Huge fan of your work!", "message": "Synthetic Startup E (fixture)", "fact_used": fact["id"]},
-                                db.one("SELECT * FROM contacts WHERE id = ?", (cid,)), db.one("SELECT * FROM jobs WHERE id = ?", (job_id,)), fact)
+        contacts.validate_draft({"note": "Huge fan of your work!", "message": "Synthetic Startup E (fixture)", "quote": detail},
+                                db.one("SELECT * FROM contacts WHERE id = ?", (cid,)), job, [fact], detail)
 
 
 # ---------------------------------------------------------------- funding extraction rules

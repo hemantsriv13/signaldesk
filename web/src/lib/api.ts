@@ -149,7 +149,10 @@ export interface Contact {
   verified_at: string | null
   outreach_id?: number | null; state?: OutreachState | null; note_text?: string | null; message_text?: string | null; drafted_by?: string | null
   sent_at?: string | null
+  followups?: Followup[]
 }
+/** Day-5 and day-12 follow-ups, written when you mark the first message sent. */
+export interface Followup { id: number; n: number; due_on: string; text: string; state: "drafted" | "sent" | "skipped"; sent_at: string | null }
 export type OutreachState = "drafted" | "sending" | "sent" | "failed" | "send_unknown" | "contacted"
 export interface FundingEvent { id: number; investor: string | null; round: string; amount_text: string | null; announced_on: string; announcement_url: string; title: string | null; other_reports?: string[] }
 export interface JobRow {
@@ -242,7 +245,7 @@ export type CaseStudy = Record<string, CaseField> & { suitability: string; suita
 /** The application pipeline (signaldesk/pipeline.py). Rules decide every number and action here. */
 export interface StageEvent { id: number; stage: string; at: string; note: string | null; origin: string; dated: number }
 export interface PipelineAction {
-  kind: "reply_waiting" | "interview" | "applied_no_contact" | "draft_unsent" | "apply" | "review_match"
+  kind: "reply_waiting" | "interview" | "applied_no_contact" | "draft_unsent" | "followup_due" | "apply" | "review_match"
   job_id: number; title: string; employer: string; text: string; why: string; days?: number | null; outreach_id?: number; contact?: string
 }
 export interface PipelineItem {

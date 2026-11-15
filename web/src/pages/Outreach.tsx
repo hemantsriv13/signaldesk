@@ -68,7 +68,7 @@ function SendingSettings({ data, onSaved }: { data: Resp; onSaved: () => void })
     <details className="max-w-3xl rounded-lg border border-border p-4">
       <summary className="cursor-pointer text-sm font-medium">Automatic sending: {data.sending.available ? (s.autosend && !s.stopped ? "on" : "off") : "not available"}</summary>
       <div className="mt-3 flex flex-col gap-3 text-sm">
-        {!data.sending.available && <p>{data.sending.reason} Discovery and drafting still run on every sweep; send drafts yourself with Copy, then Mark contacted.</p>}
+        {!data.sending.available && <p>{data.sending.reason} Discovery and drafting still run on every sweep; send drafts yourself with Copy, then Mark sent with the date.</p>}
         <label className="flex items-center gap-2"><Switch checked={s.autosend} disabled={!data.sending.available} onCheckedChange={(v) => save({ autosend: !!v })} />Send drafts for the roles I select</label>
         <div className="flex flex-wrap items-end gap-3">
           <div className="flex w-40 flex-col gap-1"><Label htmlFor="cap">Daily cap</Label>

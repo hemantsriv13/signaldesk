@@ -724,14 +724,17 @@ class Engine:
         job = self.db.one("SELECT * FROM jobs WHERE id = ?", (c["job_id"],))
         profile = self.profiles.profile()
         fit = self.latest("job_fit", "job", job["id"])
-        fact = contacts.pick_fact(profile, job, fit)
-        prompt = contacts.draft_prompt(c, job, fact, profile)
-        (note, msg), served, _esc = self._try_both(task, "outreach_draft", prompt, lambda d: contacts.validate_draft(d, c, job, fact), 400)
+        facts = contacts.pick_facts(profile, job, fit)
+        detail = contacts.pick_detail(job, facts)
+        prompt = contacts.draft_prompt(c, job, facts, profile, detail)
+        (note, msg), served, _esc = self._try_both(task, "outreach_draft", prompt, lambda d: contacts.validate_draft(d, c, job, facts, detail),
+                                                   self.cfg.model.max_output_tokens)
         o = self.db.one("SELECT * FROM outreach WHERE contact_id = ?", (c["id"],))
         if o and o["state"] == "drafted":
             self.db.update("outreach", o["id"], {"note_text": note, "message_text": msg, "drafted_by": "model", "updated_at": now_iso(),
-                                                 "inputs_json": json.dumps({"fact": fact, "detail": contacts.detail_for(c, job), "model": served})})
-        self._save(task, "outreach_draft", "contact", {"note": note, "message": msg}, {"notes": []}, {"fact": fact["id"] if fact else None}, served)
+                                                 "inputs_json": json.dumps({"facts": facts, "detail": detail, "detail_source": job.get("official_url"),
+                                                                            "model": served})})
+        self._save(task, "outreach_draft", "contact", {"note": note, "message": msg}, {"notes": []}, {"facts": [f["id"] for f in facts]}, served)
         return "Draft written" if o and o["state"] == "drafted" else "Draft written; the message was already sent or marked contacted, so it was not replaced"
 
     def _do_contact_select(self, task: dict) -> str:

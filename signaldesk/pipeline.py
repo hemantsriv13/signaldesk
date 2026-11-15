@@ -175,7 +175,12 @@ def needs_action(db: DB, now: datetime | None = None) -> list[dict]:
             out.append({"kind": "draft_unsent", "job_id": o["job_id"], "outreach_id": o["id"], "title": o["title"], "employer": o["company"],
                         "contact": o["name"], "since": o["created_at"], "days": round(days),
                         "why": f"Draft to {o['name']} written {round(days)} days ago and not sent"})
-    order = {"reply_waiting": 0, "applied_no_contact": 1, "draft_unsent": 2}
+    from .contacts import followups_due
+    for f in followups_due(db, now.date().isoformat()):
+        out.append({"kind": "followup_due", "job_id": f["job_id"], "outreach_id": f["outreach_id"], "followup_id": f["id"], "title": f["title"],
+                    "employer": f["company"], "contact": f["name"], "since": f["due_on"], "days": None,
+                    "why": f"Day-{5 if f['n'] == 1 else 12} follow-up to {f['name']} is due"})
+    order = {"reply_waiting": 0, "followup_due": 1, "applied_no_contact": 2, "draft_unsent": 3}
     return sorted(out, key=lambda x: (order[x["kind"]], -(x["days"] or 0)))
 
 
@@ -196,6 +201,8 @@ def todays_actions(db: DB, new_matches: list[dict], now: datetime | None = None,
             acts.append({**n, "text": f"Find someone at {n['employer']} to follow up on {n['title']}"})
         elif n["kind"] == "draft_unsent":
             acts.append({**n, "text": f"Send or drop the note to {n['contact']} at {n['employer']}"})
+        elif n["kind"] == "followup_due":
+            acts.append({**n, "text": f"Send the follow-up to {n['contact']} at {n['employer']}"})
     for j in db.all("SELECT id, title, employer FROM jobs WHERE status IN ('Interested', 'Investigate')"):
         e = _last_event(db, j["id"], "Shortlisted")
         if e and e["dated"] and _days(now, e["at"]) >= SHORTLIST_NOT_APPLIED_DAYS:
@@ -208,7 +215,7 @@ def todays_actions(db: DB, new_matches: list[dict], now: datetime | None = None,
                          "text": f"Decide on {m['title']} at {m['employer']}", "why": "New potential match: shortlist it or set it aside"})
     seen, out = set(), []
     for a in acts:
-        key = (a["kind"], a["job_id"], a.get("outreach_id"))
+        key = (a["kind"], a["job_id"], a.get("outreach_id"), a.get("followup_id"))
         if key not in seen:
             seen.add(key)
             out.append(a)
