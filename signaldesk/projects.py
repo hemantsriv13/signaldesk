@@ -240,9 +240,13 @@ def signaldesk(name, root, db, now):
 def collect(cfg: Config, db: DB, now: datetime):
     statuses, candidates = [], []
     for p in cfg.project:
-        root = Path(p.path).expanduser()
-        root = (root if root.is_absolute() else cfg.home / root).resolve()
-        status = {"name": p.name, "kind": p.kind, "available": root.is_dir(), "open_reviews": 0,
+        try:
+            root = Path(p.path).expanduser()
+            root = (root if root.is_absolute() else cfg.home / root).resolve()
+            available = root.is_dir()
+        except (OSError, RuntimeError):
+            available = False
+        status = {"name": p.name, "kind": p.kind, "available": available, "open_reviews": 0,
                   "branch": None, "last_commit_at": None, "dirty": None, "git_error": None, "notice": None}
         statuses.append(status)
         if not status["available"]:

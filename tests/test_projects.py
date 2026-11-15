@@ -278,3 +278,13 @@ def test_agent_uses_existing_runs_without_a_model_task(engine, monkeypatch):
     assert engine.db.scalar("SELECT COUNT(*) FROM project_tasks") == 3
     assert engine.db.scalar("SELECT COUNT(*) FROM tasks") == 0
     assert engine.db.scalar("SELECT COUNT(*) FROM model_calls") == 0
+
+
+def test_denied_project_directory_is_reported_not_fatal(tmp_path, monkeypatch):
+    cfg, db = setup(tmp_path, monkeypatch)
+    def denied(path):
+        raise PermissionError("fixture denial")
+    monkeypatch.setattr(Path, "is_dir", denied)
+    statuses, tasks = projects.collect(cfg, db, NOW)
+    assert not statuses[0]["available"]
+    assert tasks[0]["type"] == "laptop_reminder"
