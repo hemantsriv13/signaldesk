@@ -372,7 +372,41 @@ def _migrate_v4(conn: sqlite3.Connection) -> None:
     conn.executescript(V4_TABLES)
 
 
-MIGRATIONS = [_migrate_v3, _migrate_v4]
+PIPELINE_TABLES = """
+CREATE TABLE IF NOT EXISTS job_events (
+  id INTEGER PRIMARY KEY,
+  job_id INTEGER NOT NULL REFERENCES jobs(id),
+  stage TEXT NOT NULL,               -- Shortlisted | Applied | Contact made | Reply | Interview | Offer | Rejected | Dropped
+  at TEXT NOT NULL,                  -- when it happened (you can give an earlier date)
+  note TEXT,
+  origin TEXT NOT NULL,              -- you | status | outreach | before_pipeline
+  dated INTEGER NOT NULL DEFAULT 1,  -- 0: the real date is unknown (a status set before the pipeline existed)
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS job_events_job ON job_events(job_id, at);
+"""
+
+
+def _migrate_pipeline(conn: sqlite3.Connection) -> None:
+    """Statuses are kept as they are. Each job already in a pipeline stage gets one event so it counts
+    in the funnel; its real date is unknown, so it is marked undated and left out of timings. Drafts
+    already marked sent or contacted become "Contact made" on the date they were marked."""
+    conn.executescript(PIPELINE_TABLES)
+    if conn.execute("SELECT 1 FROM job_events LIMIT 1").fetchone():
+        return
+    now = now_iso()
+    stage = {"Interested": "Shortlisted", "Investigate": "Shortlisted", "Applied": "Applied"}
+    for job_id, status, seen in conn.execute("SELECT id, status, COALESCE(changed_at, first_seen_at) FROM jobs WHERE status IN "
+                                             "('Interested', 'Investigate', 'Applied')").fetchall():
+        conn.execute("INSERT INTO job_events (job_id, stage, at, note, origin, dated, created_at) VALUES (?, ?, ?, ?, 'before_pipeline', 0, ?)",
+                     (job_id, stage[status], seen, "Status set before the pipeline existed; date unknown", now))
+    for job_id, sent in conn.execute("SELECT job_id, COALESCE(sent_at, updated_at) FROM outreach WHERE job_id IS NOT NULL AND state IN "
+                                     "('contacted', 'sent')").fetchall():
+        conn.execute("INSERT INTO job_events (job_id, stage, at, note, origin, dated, created_at) VALUES (?, 'Contact made', ?, NULL, 'outreach', 1, ?)",
+                     (job_id, sent, now))
+
+
+MIGRATIONS = [_migrate_v3, _migrate_v4, _migrate_pipeline]
 
 
 class DB:

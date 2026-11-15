@@ -18,7 +18,7 @@ from pydantic import BaseModel
 
 import hmac
 
-from . import auth, collect, contacts, funding, hiring, jobrules, registry, sweep
+from . import auth, collect, contacts, funding, hiring, jobrules, pipeline, registry, sweep
 from . import lan as lan_mod
 from . import panel as panel_api
 from .cv import MAX_BYTES, preview_cv
@@ -32,13 +32,18 @@ from .netsafe import FetchError
 from .scheduler import Scheduler
 
 WEB = Path(__file__).resolve().parent.parent / "web" / "dist"
-JOB_STATUSES = ["New", "Interested", "Investigate", "Applied", "Not relevant", "Archived"]
+JOB_STATUSES = pipeline.STATUSES
 VERDICTS = ["useful", "not_relevant", "known", "too_technical"]
 LOCAL_HOSTS = {"127.0.0.1", "localhost", "[::1]", "testserver"}
 
 
 class JobPatch(BaseModel):
     status: str
+
+class StageBody(BaseModel):
+    stage: str
+    note: str = ""
+    at: str = ""             # YYYY-MM-DD when it happened; empty means now
 
 class JobImport(BaseModel):
     url: str
@@ -349,8 +354,8 @@ def create_app(engine: Engine, scheduler: Scheduler | None = None, delivery_env:
                       "failed": db.scalar("SELECT COUNT(*) FROM tasks WHERE status = 'failed'")},
             "counts": {
                 "newMatches": db.scalar("SELECT COUNT(*) FROM jobs WHERE bucket = 'candidate' AND listing_state = 'open' AND status = 'New' AND change_state IN ('new', 'changed') AND duplicate_of IS NULL"),
-                "matches": db.scalar("SELECT COUNT(*) FROM jobs WHERE bucket = 'candidate' AND listing_state = 'open' AND duplicate_of IS NULL AND status NOT IN ('Not relevant', 'Archived')"),
-                "review": db.scalar("SELECT COUNT(*) FROM jobs WHERE bucket = 'review' AND listing_state = 'open' AND duplicate_of IS NULL AND status NOT IN ('Not relevant', 'Archived')"),
+                "matches": db.scalar("SELECT COUNT(*) FROM jobs WHERE bucket = 'candidate' AND listing_state = 'open' AND duplicate_of IS NULL AND status NOT IN ('Not relevant', 'Archived', 'Rejected', 'Dropped')"),
+                "review": db.scalar("SELECT COUNT(*) FROM jobs WHERE bucket = 'review' AND listing_state = 'open' AND duplicate_of IS NULL AND status NOT IN ('Not relevant', 'Archived', 'Rejected', 'Dropped')"),
                 "articles": db.scalar("SELECT COUNT(*) FROM articles WHERE duplicate_of IS NULL"),
                 "cards": db.scalar("SELECT COUNT(DISTINCT target_id) FROM analyses WHERE kind = 'reading_card'"),
                 "cases": db.scalar("SELECT COUNT(DISTINCT target_id) FROM analyses WHERE kind = 'case_study'"),
@@ -411,12 +416,12 @@ def create_app(engine: Engine, scheduler: Scheduler | None = None, delivery_env:
         elif view == "closed":
             where.append("listing_state = 'no_longer_listed'")
         elif view == "saved":
-            where.append("status IN ('Interested', 'Investigate', 'Applied')")
+            where.append("status IN ('Interested', 'Investigate', 'Applied', 'Contact made', 'Reply', 'Interview', 'Offer', 'Rejected', 'Dropped')")
         if status:
             where.append("status = ?")
             args.append(status)
         elif view in ("matches", "review"):
-            where.append("status NOT IN ('Not relevant', 'Archived')")
+            where.append("status NOT IN ('Not relevant', 'Archived', 'Rejected', 'Dropped')")
         if location:
             where.append("location_class = ?")
             args.append(location)
@@ -440,10 +445,10 @@ def create_app(engine: Engine, scheduler: Scheduler | None = None, delivery_env:
                 r["analysis_pending"] = r["id"] in waiting
                 r["verified_hours_ago"] = _hours(r["last_verified_at"])
         counts = {v: db.scalar(f"SELECT COUNT(*) FROM jobs WHERE duplicate_of IS NULL AND {c}") for v, c in {
-            "matches": "bucket = 'candidate' AND listing_state = 'open' AND status NOT IN ('Not relevant', 'Archived')",
-            "review": "bucket = 'review' AND listing_state = 'open' AND status NOT IN ('Not relevant', 'Archived')",
+            "matches": "bucket = 'candidate' AND listing_state = 'open' AND status NOT IN ('Not relevant', 'Archived', 'Rejected', 'Dropped')",
+            "review": "bucket = 'review' AND listing_state = 'open' AND status NOT IN ('Not relevant', 'Archived', 'Rejected', 'Dropped')",
             "outside": "bucket = 'outside' AND listing_state = 'open'", "closed": "listing_state = 'no_longer_listed'",
-            "saved": "status IN ('Interested', 'Investigate', 'Applied')"}.items()}
+            "saved": "status IN ('Interested', 'Investigate', 'Applied', 'Contact made', 'Reply', 'Interview', 'Offer', 'Rejected', 'Dropped')"}.items()}
         return {"jobs": rows, "counts": counts, "statuses": JOB_STATUSES, "locationLabels": jobrules.LOCATION_LABEL,
                 "families": {k: v for k, v in jobrules.FAMILY_LABEL.items() if k not in ("ambiguous", "other")}, "bands": jobrules.BAND_LABEL,
                 "groups": jobrules.GROUP_LABEL}
@@ -492,17 +497,44 @@ def create_app(engine: Engine, scheduler: Scheduler | None = None, delivery_env:
                 "fit": engine.latest("job_fit", "job", job_id), "task": pending("job_fit", job_id),
                 "compensation_note": jobrules.compensation_note(j["salary_text"], j["salary_kind"], prefs["ctc_threshold_lakh"]),
                 "location_label": jobrules.LOCATION_LABEL.get(j["location_class"] or "unknown"), "family_label": jobrules.FAMILY_LABEL.get(j["role_family"] or "other"),
-                "verified_hours_ago": _hours(j["last_verified_at"]), "feedback": [r["verdict"] for r in db.all("SELECT verdict FROM feedback WHERE item_type = 'job' AND item_id = ?", (job_id,))],
+                "verified_hours_ago": _hours(j["last_verified_at"]), "stage": pipeline.stage_of(j["status"]), "events": pipeline.events(db, job_id),
+                "stages": pipeline.STAGES, "feedback": [r["verdict"] for r in db.all("SELECT verdict FROM feedback WHERE item_type = 'job' AND item_id = ?", (job_id,))],
                 "profile_facts": engine.profiles.profile()["facts"]}
 
 
     @app.patch("/api/jobs/{job_id}")
     def patch_job(job_id: int, body: JobPatch):
-        job_or_404(job_id)
+        j = job_or_404(job_id)
         if body.status not in JOB_STATUSES:
             raise HTTPException(400, "Unknown status")
         db.update("jobs", job_id, {"status": body.status})
+        pipeline.on_status_change(db, job_id, j["status"], body.status)
         return {"ok": True}
+
+    @app.post("/api/jobs/{job_id}/stage")
+    def set_stage(job_id: int, body: StageBody):
+        job_or_404(job_id)
+        try:
+            res = pipeline.record(db, job_id, body.stage, note=body.note, at=body.at or None)
+        except ValueError as e:
+            raise HTTPException(400, str(e)) from None
+        return {**res, "events": pipeline.events(db, job_id)}
+
+    @app.get("/api/pipeline")
+    def pipeline_view():
+        items = db.all("SELECT id, title, employer, status, apply_url, official_url, location_raw FROM jobs WHERE status IN "
+                       f"({','.join('?' * len(pipeline.STATUS_STAGE))})", tuple(pipeline.STATUS_STAGE))
+        for it in items:
+            it["stage"] = pipeline.stage_of(it["status"])
+            # When it entered its current stage, with your note: what "days in stage" is measured from.
+            it["last_event"] = db.one("SELECT stage, at, note, dated FROM job_events WHERE job_id = ? AND stage = ? ORDER BY at DESC, id DESC LIMIT 1",
+                                      (it["id"], it["stage"]))
+        items.sort(key=lambda x: (pipeline.STAGES.index(x["stage"]), -(datetime.fromisoformat(x["last_event"]["at"]).timestamp() if x["last_event"] else 0)))
+        return {**pipeline.summary(db), "items": items}
+
+    @app.get("/api/actions")
+    def todays_actions():
+        return {"actions": pipeline.todays_actions(db, top(limit=20)["jobs"])}
 
     @app.post("/api/jobs/{job_id}/analyse")
     def analyse_job(job_id: int):
@@ -932,6 +964,8 @@ def create_app(engine: Engine, scheduler: Scheduler | None = None, delivery_env:
         if o["state"] in ("sent", "contacted"):
             return {"state": o["state"]}
         db.update("outreach", oid, {"state": "contacted", "updated_at": now_iso(), "sent_at": o["sent_at"] or now_iso()})
+        if o["job_id"]:
+            pipeline.record(db, o["job_id"], "Contact made", origin="outreach", advance_only=True)
         return {"state": "contacted"}
 
     @app.put("/api/outreach/settings")

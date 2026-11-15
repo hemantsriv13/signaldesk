@@ -15,7 +15,7 @@ from .text import norm
 
 ELIGIBLE = ("bengaluru", "remote_india")
 UNCLASSIFIED = ("other", "ambiguous")
-SHORTLIST = ("Interested", "Investigate", "Applied")
+SHORTLIST = ("Interested", "Investigate", "Applied", "Contact made", "Reply", "Interview", "Offer")   # in the pipeline and still open
 PREVIEW = 3
 
 

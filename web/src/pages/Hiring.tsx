@@ -44,7 +44,7 @@ const BOARD_PROBLEM: Record<string, string> = {
   failed: "Job board could not be checked", unreadable: "Careers page can't be read automatically", no_website: "Company website not known yet",
   unchecked: "Not checked yet", no_careers_page: "No careers page found",
 }
-const SHORTLIST = ["Interested", "Investigate", "Applied"]
+const SHORTLIST = ["Interested", "Investigate", "Applied", "Contact made", "Reply", "Interview", "Offer"]
 
 export default function Hiring() {
   const route = useRoute()

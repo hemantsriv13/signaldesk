@@ -17,7 +17,7 @@ import re
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
-from . import collect, jobrules
+from . import collect, pipeline, jobrules
 from .db import now_iso
 from .text import canonical_url, norm, sha, title_key
 
@@ -309,11 +309,12 @@ def register(app: FastAPI, engine) -> None:
 
     @app.post("/api/panel/jobs/{jid}/decision")
     def panel_decision(jid: int, body: DecisionBody):
-        job_or_404(jid)
+        old = job_or_404(jid)["status"]
         status = {"shortlist": "Interested", "dismiss": "Not relevant", "clear": "New", "applied": "Applied"}.get(body.decision)
         if not status:
             raise HTTPException(400, "Unknown decision")
         db.update("jobs", jid, {"status": status})
+        pipeline.on_status_change(db, jid, old, status)
         return result(engine, jid)
 
     @app.post("/api/panel/jobs/{jid}/description")
