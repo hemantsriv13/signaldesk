@@ -41,6 +41,10 @@ def classify(p: dict, prefs: dict, families: list[str] | None = None) -> dict:
     b, reason = jobrules.bucket(p["title"], fams, loc.cls, prefs.get("role_families", []))
     if b == "candidate" and loc.cls not in wanted_locs:
         b, reason = "review", f"Check: {jobrules.LOCATION_LABEL[loc.cls]} is not in your location preferences"
+    if b == "candidate" and families:
+        # On real data the 4B placed engineering and accounting roles in your families (docs/V3_VALIDATION.md),
+        # so a family that only the model saw goes to To review, never straight to your matches.
+        b, reason = "review", f"Check: the local model read the duties as {' + '.join(jobrules.FAMILY_LABEL.get(f, f) for f in families)}"
     return {"location_class": loc.cls, "location_evidence": loc.evidence[:400], "salary_text": salary, "salary_kind": kind,
             "role_family": fams[0], "role_families": json.dumps(fams), "role_evidence": json.dumps(evidence),
             "role_source": "model" if families else ("rules_uncertain" if ambiguous else "rules"),

@@ -121,3 +121,12 @@ def test_us_state_remote_roles_are_elsewhere_not_uncertain(loc):
 
 def test_indiana_is_not_india():
     assert jobrules.classify_location("Indianapolis, Indiana").cls == "other"
+
+
+def test_a_family_only_the_model_saw_goes_to_review_not_matches():
+    """On real data the 4B placed engineering roles in strategy & ops (docs/V3_VALIDATION.md)."""
+    p = {"title": "Platform Engineer", "location": "Bengaluru", "workplace": None, "description_text": "Build services.", "salary_extra": None}
+    got = collect.classify(p, DEFAULT_PREFS, ["strategy_ops"])
+    assert got["bucket"] == "review" and "local model" in got["bucket_reason"] and got["role_source"] == "model"
+    title_only = collect.classify({**p, "title": "Strategy Manager"}, DEFAULT_PREFS)
+    assert title_only["bucket"] == "candidate"            # rules alone still make a match
