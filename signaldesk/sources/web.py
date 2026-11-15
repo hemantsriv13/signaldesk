@@ -222,7 +222,8 @@ def article(fetcher: Fetcher, url: str) -> dict:
         if h and h != host and not SOCIAL.search(h):
             links.append({"href": href, "host": h.removeprefix("www."), "text": re.sub(r"\s+", " ", link["text"]).strip()})
     title = re.search(r"<title[^>]*>(.*?)</title>", raw, re.S | re.I)
-    return {"url": final, "title": html_to_text(title.group(1)) if title else "", "text": html_to_text(raw), "date": published,
+    # "stream" is the page's own text, element by element; html_to_text can drop sections such as team cards.
+    return {"url": final, "title": html_to_text(title.group(1)) if title else "", "text": html_to_text(raw), "stream": page.text(), "date": published,
             "links": links, "people_links": [{"href": urljoin(final, l["href"]), "block": _block(page, l, 160, 160), "cards": page.cards(l)}
                                              for l in page.links if "linkedin.com/in/" in l["href"]]}
 

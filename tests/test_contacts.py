@@ -255,3 +255,46 @@ def test_snapshot_drops_contact_fields_even_if_a_briefing_carried_them():
                          "draft": "Hello Tamsin", "outreach": {"state": "drafted"}}]}
     text = json.dumps(delivery.public_snapshot(content))
     assert "Tamsin" not in text and "linkedin" not in text and "drafted" not in text
+
+
+# ---------------------------------------------------------------- found on real company pages (copy of the data), rebuilt with invented people
+def test_names_with_initials_and_department_titles_are_found(engine, boards):
+    got = team(engine, boards, '<div><h3>Ravindran K S</h3><p>Co-founder and CTO</p></div>'
+                               '<div><h3>Corwin Ashdale</h3><p>Co-founder, Engineering</p></div>')
+    assert {n: c["title"] for n, c in got.items()} == {"Ravindran K S": "Co-Founder And Cto", "Corwin Ashdale": "Co-Founder, Engineering"}
+
+
+def test_an_about_page_that_moved_is_still_read(engine, boards, monkeypatch):
+    """/about redirecting to /company/about-us is the same page under a new address, not the home page."""
+    jid = posting_job(engine, boards, content="<p>Own quarterly planning.</p>")
+    boards.routes[f"https://{DOMAIN_A}/company/about-us"] = (200, html("<div><h3>Corwin Ashdale</h3><p>Co-founder and CEO</p></div>"))
+    real = contacts.web.article
+    monkeypatch.setattr(contacts.web, "article", lambda f, url: {**real(f, f"https://{DOMAIN_A}/company/about-us"),
+                                                                  "url": f"https://{DOMAIN_A}/company/about-us"})
+    contacts.discover_for_job(engine.db, engine.fetcher, jid)
+    assert [c["name"] for c in all_contacts(engine.db)] == ["Corwin Ashdale"]
+
+
+def test_a_country_home_page_counts_as_the_home_page():
+    assert contacts._home_page("https://quillfeather.example/in") and contacts._home_page("https://quillfeather.example/en-gb/")
+    assert not contacts._home_page("https://quillfeather.example/in/about")
+
+
+def test_a_careers_page_on_a_job_board_never_sends_discovery_to_the_board_company(engine, boards):
+    """jobs.ashbyhq.com/<company> must not turn into ashbyhq.com/about."""
+    cid = add_company(engine.db, CO_B, "bramble")
+    engine.db.update("companies", cid, {"careers_url": "https://jobs.ashbyhq.com/bramble"})
+    boards.routes["https://boards-api.greenhouse.io/v1/boards/bramble/"] = (200, greenhouse([{"id": 990, "title": "Strategy Manager",
+                                                                                                 "content": "<p>Own planning.</p>"}]))
+    from signaldesk import collect
+    collect.collect_jobs(engine.db, engine.fetcher, engine.profiles.prefs())
+    jid = engine.db.scalar("SELECT id FROM jobs WHERE ext_id = 'gh:990'")
+    res = contacts.discover_for_job(engine.db, engine.fetcher, jid)
+    assert res["checked"] == ["posting"] and not [u for u in boards.hits if "ashbyhq.com/" in u and "/about" in u]
+
+
+def test_team_cards_are_read_even_where_the_article_text_drops_them(engine, boards):
+    """On a real page the people section was missing from the article text but present in the page itself."""
+    got = team(engine, boards, '<section aria-label="Leadership"><div><div><h3>Corwin Ashdale</h3></div><div><p>Founder &amp; CEO</p></div>'
+                               '<a href="https://www.linkedin.com/in/corwin-ashdale-fixture">LinkedIn</a></div></section>')
+    assert got["Corwin Ashdale"]["profile_url"] == "https://www.linkedin.com/in/corwin-ashdale-fixture"

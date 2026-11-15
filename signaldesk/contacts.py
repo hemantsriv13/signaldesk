@@ -28,7 +28,8 @@ from .sources import web
 from .text import find_quote, norm, sha
 
 MAX_PER_JOB = 3
-NAME = r"([A-Z][a-z]+(?:[ -][A-Z][a-z'’]+){1,2})"
+# Two or three words; a later word may be an initial ("Vishwanath T R", "Priya K."), common in Indian names.
+NAME = r"([A-Z][a-z]+(?:[ -](?:[A-Z][a-z'’]+|[A-Z]\.?(?![a-z]))){1,2})"
 POSTING_PATTERNS = [
     (re.compile(rf"\b(?:report(?:s|ing)?|reporting line)\s+(?:directly\s+)?(?:in)?to\s+{NAME}(?:\s*,\s*(?:our\s+)?([A-Z][^.,;\n]{{2,60}}))?"), "named in the posting as the person this role reports to", 10),
     (re.compile(rf"\bhiring manager(?: is|:)?\s+{NAME}(?:\s*,\s*([A-Z][^.,;\n]{{2,60}}))?"), "named in the posting as the hiring manager", 5),
@@ -117,9 +118,26 @@ def _other_company(title: str, company: str) -> bool:
     own = norm(company)
     for part in title.split(",")[1:]:
         part = part.strip()
-        if part and not TITLE_WORDS.search(part) and norm(part) not in own and own not in norm(part):
+        if part and not TITLE_WORDS.search(part) and not DEPARTMENT.fullmatch(part) and norm(part) not in own and own not in norm(part):
             return True
     return False
+
+
+# What may follow a title after a comma without naming another company: "Co-founder, Engineering".
+DEPARTMENT = re.compile(r"(?i)(engineering|product|design|sales|marketing|operations|ops|finance|people|hr|legal|research|growth|strategy|"
+                        r"technology|tech|business|customer success|partnerships|data|ai|ml|gtm|go-to-market|platform|infrastructure|"
+                        r"india|apac|emea|americas|asia|global)( (and|&) [a-z ]+)?")
+
+
+def _home_page(url: str) -> bool:
+    """The site's home page, or a country home page such as /in or /en-gb."""
+    path = urlsplit(url).path.rstrip("/").lower()
+    return path == "" or bool(re.fullmatch(r"/[a-z]{2}(-[a-z]{2})?", path))
+
+
+# Job boards host careers pages for many companies; their own team is never the employer's team.
+ATS_HOSTS = re.compile(r"(^|\.)(greenhouse\.io|lever\.co|ashbyhq\.com|workable\.com|smartrecruiters\.com|myworkdayjobs\.com|"
+                       r"bamboohr\.com|recruitee\.com|teamtailor\.com|keka\.com|zohorecruit\.\w+|freshteam\.com)$", re.I)
 
 
 def from_team_page(fetcher: Fetcher, domain: str, company: str) -> list[dict]:
@@ -136,8 +154,8 @@ def from_team_page(fetcher: Fetcher, domain: str, company: str) -> list[dict]:
             page = web.article(fetcher, url)
         except FetchError:
             continue
-        if urlsplit(page["url"]).path.rstrip("/").lower() != path:
-            continue
+        if _home_page(page["url"]):
+            continue                       # redirected to the home page: what it shows is not the team
         linked: dict[str, str] = {}
         for pl in page["people_links"]:
             for card in pl.get("cards", []):
@@ -146,7 +164,7 @@ def from_team_page(fetcher: Fetcher, domain: str, company: str) -> list[dict]:
                     if len(names) == 1:
                         linked.setdefault(names[0], pl["href"].split("?")[0])
                     break
-        for m in re.finditer(rf"{NAME_AT}\s*[\n,–—-]\s*((?i:{TEAM_ROLE}))", page["text"]):
+        for m in re.finditer(rf"{NAME_AT}\s*[\n,–—-]\s*((?i:{TEAM_ROLE}))", page.get("stream") or page["text"]):
             title = re.sub(r"\s+", " ", m.group(2)).strip()
             if _other_company(title, company):
                 continue
@@ -246,7 +264,7 @@ def discover_for_job(db: DB, fetcher: Fetcher, job_id: int) -> dict:
     if not domain and job["company_id"]:
         careers = db.scalar("SELECT careers_url FROM companies WHERE id = ?", (job["company_id"],)) or ""
         host = urlsplit(careers).hostname or ""
-        domain = host.removeprefix("www.").removeprefix("careers.").removeprefix("jobs.") or None
+        domain = None if ATS_HOSTS.search(host) else host.removeprefix("www.").removeprefix("careers.").removeprefix("jobs.") or None
     tried = ["posting"]
     if len(people) < MAX_PER_JOB and domain:
         people += from_team_page(fetcher, domain, job["employer"])
