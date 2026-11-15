@@ -86,7 +86,11 @@ class Engine:
 
     # ------------------------------------------------------------ runs
     def _resume(self) -> None:
-        """After a restart: put interrupted tasks back in the queue; close runs that cannot continue."""
+        """After a restart: put interrupted tasks back in the queue; close runs that cannot continue.
+        Skipped while another live process holds the sweep lease: its runs and tasks are not interrupted,
+        they are in progress (for example the app is sweeping when the scheduled task starts)."""
+        if sweep.held_by_other_live_process(sweep.holder(self.db)):
+            return
         n = self.db.run("UPDATE tasks SET status = 'queued', note = 'Resumed after restart' WHERE status = 'running'")
         for r in self.db.all("SELECT id FROM runs WHERE status = 'collecting'"):
             self._log(r["id"], "The app stopped during collection. Saved results were kept; start a new run to collect again.")

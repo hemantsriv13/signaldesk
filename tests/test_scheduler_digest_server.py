@@ -119,3 +119,46 @@ def test_app_page_is_rechecked_so_updates_show(engine):
         pytest.skip("web app not built")
     r = client(engine).get("/reading")
     assert r.status_code == 200 and r.headers["cache-control"] == "no-cache"
+
+
+def test_a_second_process_never_breaks_a_live_sweep(engine):
+    """A scheduled task or CLI sweep that starts while the app is sweeping must not mark the app's
+    runs failed or re-queue its running tasks (found while validating V3 on a data copy)."""
+    from signaldesk import sweep
+    from signaldesk.db import DB, now_iso
+    from signaldesk.engine import Engine
+    db = engine.db
+    import os
+    assert sweep.acquire(db, f"{os.getppid()}:livegrp", scope="full", trigger="manual", minutes=180) is None   # a live process's lease
+    rid = db.insert("runs", {"agent": "job_scout", "trigger": "manual", "group_id": "livegrp", "status": "collecting", "started_at": now_iso(),
+                             "stats_json": "{}", "log_json": "[]", "options_json": "{}"})
+    tid = db.insert("tasks", {"run_id": rid, "kind": "job_fit", "target_type": "job", "target_id": 1, "status": "running", "created_at": now_iso(),
+                              "priority": 30, "max_attempts": 3})
+    second = Engine(engine.cfg, DB(engine.cfg.db_path), engine.model, engine.fetcher, start_worker=False)
+    assert db.scalar("SELECT status FROM runs WHERE id = ?", (rid,)) == "collecting"
+    assert db.scalar("SELECT status FROM tasks WHERE id = ?", (tid,)) == "running"
+    assert second.start_all()["skipped"]                                      # and it does not start a second sweep
+
+
+def test_after_a_crash_restart_still_recovers_interrupted_work(engine):
+    """The process that held the lease is gone: restarting must close its runs and re-queue its tasks."""
+    from signaldesk import sweep
+    from signaldesk.db import DB, now_iso
+    from signaldesk.engine import Engine
+    db = engine.db
+    dead = 4_000_000          # far above any real process id
+    assert not sweep.pid_alive(dead)
+    sweep.acquire(db, f"{dead}:oldgrp", scope="full", trigger="manual", minutes=180)
+    rid = db.insert("runs", {"agent": "job_scout", "trigger": "manual", "group_id": "oldgrp", "status": "collecting", "started_at": now_iso(),
+                             "stats_json": "{}", "log_json": "[]", "options_json": "{}"})
+    tid = db.insert("tasks", {"run_id": rid, "kind": "job_fit", "target_type": "job", "target_id": 1, "status": "running", "created_at": now_iso(),
+                              "priority": 30, "max_attempts": 3})
+    Engine(engine.cfg, DB(engine.cfg.db_path), engine.model, engine.fetcher, start_worker=False)
+    assert db.scalar("SELECT status FROM runs WHERE id = ?", (rid,)) == "failed"
+    assert db.scalar("SELECT status FROM tasks WHERE id = ?", (tid,)) == "queued"
+
+
+def test_pid_alive_sees_this_process():
+    import os
+    from signaldesk import sweep
+    assert sweep.pid_alive(os.getpid()) and sweep.pid_alive(os.getppid())

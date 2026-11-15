@@ -66,6 +66,39 @@ def stale(lease: dict) -> bool:
     return _expired(lease, 10 ** 6)
 
 
+def pid_alive(pid: int) -> bool:
+    """Whether a process with this id is running on this computer. Never signals or stops it
+    (on Windows, os.kill would terminate the process, so it is not used)."""
+    if pid <= 0:
+        return False
+    if os.name == "nt":
+        import ctypes
+        k32 = ctypes.windll.kernel32
+        handle = k32.OpenProcess(0x1000, False, pid)        # PROCESS_QUERY_LIMITED_INFORMATION
+        if not handle:
+            return False
+        try:
+            code = ctypes.c_ulong()
+            return bool(k32.GetExitCodeProcess(handle, ctypes.byref(code))) and code.value == 259   # STILL_ACTIVE
+        finally:
+            k32.CloseHandle(handle)
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
+
+
+def held_by_other_live_process(lease: dict | None) -> bool:
+    """A lease owned by another process that is still running and still beating."""
+    if not lease or not lease.get("owner"):
+        return False
+    owner_pid = int(str(lease["owner"]).split(":", 1)[0] or 0)
+    return owner_pid != os.getpid() and not stale(lease) and pid_alive(owner_pid)
+
+
 def acquire(db: DB, owner: str, *, scope: str, trigger: str, minutes: int) -> dict | None:
     """Take the lease. Returns None when it was taken, else the lease that is holding it."""
     with db.immediate() as conn:
