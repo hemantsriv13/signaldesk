@@ -95,9 +95,40 @@ def from_announcement(text: str, url: str, company: str) -> list[dict]:
     return out
 
 
+# A name must start a word: "LinkedIn Corwin Ashdale" must not give "In Corwin Ashdale".
+NAME_AT = rf"(?<![A-Za-z'’]){NAME}"
+NAME_LINE = re.compile(rf"^{NAME}$")
+TEAM_ROLE = (r"(?:co-?)?founder[^\n]{0,30}|ceo|cto|coo|head of [^\n]{2,40}|vp [^\n]{2,40}|director [^\n]{2,40}|"
+             r"[a-z ]*recruit[^\n]{0,30}|talent [^\n]{2,30}")
+
+
+def _names_in(card: str) -> list[str]:
+    """People named in one page element: a line that is only a name, or "Name, Title" on one line."""
+    names = []
+    for line in (ln.strip() for ln in card.splitlines()):
+        m = NAME_LINE.match(line) or re.match(rf"^{NAME}\s*,", line)
+        if m and not NOT_A_NAME.search(m.group(1)) and not TITLE_WORDS.fullmatch(m.group(1)):
+            names.append(m.group(1))
+    return list(dict.fromkeys(names))
+
+
+def _other_company(title: str, company: str) -> bool:
+    """A title like "Founder and CEO, Lightspeed" names another company: a customer quote, not staff."""
+    own = norm(company)
+    for part in title.split(",")[1:]:
+        part = part.strip()
+        if part and not TITLE_WORDS.search(part) and norm(part) not in own and own not in norm(part):
+            return True
+    return False
+
+
 def from_team_page(fetcher: Fetcher, domain: str, company: str) -> list[dict]:
-    """People listed on the company's own about/team page. A LinkedIn link is kept only when it sits in
-    the same block as the person's name on that page."""
+    """People listed on the company's own about/team page.
+
+    A page reached by a redirect to some other address (for example the home page) is ignored: what it
+    lists is not the team. A LinkedIn link goes to a person only when the smallest page element around
+    the link names exactly that one person; if it names several, the link is dropped, never guessed. A
+    title that names another company (a customer testimonial) is not a member of this team."""
     out = []
     for path in ("/about", "/team", "/about-us", "/company", "/people"):
         url = f"https://{domain}{path}"
@@ -105,19 +136,23 @@ def from_team_page(fetcher: Fetcher, domain: str, company: str) -> list[dict]:
             page = web.article(fetcher, url)
         except FetchError:
             continue
+        if urlsplit(page["url"]).path.rstrip("/").lower() != path:
+            continue
+        linked: dict[str, str] = {}
         for pl in page["people_links"]:
-            block = pl["block"]
-            m = re.search(NAME, block)
-            t = TITLE_WORDS.search(block)
-            if m and t:
-                p = _person(m.group(1), t.group(0).title(), origin="team_page", evidence_url=page["url"], evidence=block,
-                            why=f"Listed on {company}'s own team page", rank=20, profile_url=pl["href"].split("?")[0])
-                if p:
-                    out.append(p)
-        # Names with a role but no profile link are still useful, marked as having no linked profile.
-        for m in re.finditer(rf"{NAME}\s*[\n,–—-]\s*((?i:(?:co-?)?founder[^\n]{{0,30}}|ceo|cto|coo|head of [^\n]{{2,40}}|vp [^\n]{{2,40}}|director [^\n]{{2,40}}|[a-z ]*recruit[^\n]{{0,30}}|talent [^\n]{{2,30}}))", page["text"]):
-            p = _person(m.group(1), m.group(2).title(), origin="team_page", evidence_url=page["url"], evidence=m.group(0),
-                        why=f"Listed on {company}'s own team page", rank=25)
+            for card in pl.get("cards", []):
+                names = _names_in(card)
+                if names:
+                    if len(names) == 1:
+                        linked.setdefault(names[0], pl["href"].split("?")[0])
+                    break
+        for m in re.finditer(rf"{NAME_AT}\s*[\n,–—-]\s*((?i:{TEAM_ROLE}))", page["text"]):
+            title = re.sub(r"\s+", " ", m.group(2)).strip()
+            if _other_company(title, company):
+                continue
+            p = _person(m.group(1), title.title(), origin="team_page", evidence_url=page["url"], evidence=m.group(0),
+                        why=f"Listed on {company}'s own team page", rank=20 if m.group(1) in linked else 25,
+                        profile_url=linked.get(m.group(1)))
             if p:
                 out.append(p)
         if out:

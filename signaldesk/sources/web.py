@@ -42,7 +42,8 @@ def parse_date(text: str | None) -> str | None:
 
 
 class _Page(HTMLParser):
-    """Plain-text stream with the position of every link and every <time datetime>."""
+    """Plain-text stream with the position of every link and every <time datetime>. Each link also
+    keeps the block elements around it (innermost first), so it can be tied to its own card."""
 
     def __init__(self):
         super().__init__(convert_charrefs=True)
@@ -52,6 +53,7 @@ class _Page(HTMLParser):
         self.times: list[tuple[int, str]] = []
         self._a: dict | None = None
         self._skip = 0
+        self._open: list[dict] = []            # block elements not yet closed: {"tag", "start", "end"}
 
     def _add(self, s: str) -> None:
         self.stream.append(s)
@@ -63,8 +65,10 @@ class _Page(HTMLParser):
             self._skip += 1
         elif tag in _BLOCK:
             self._add("\n")
+            self._open.append({"tag": tag, "start": self.size, "end": None})
         if tag == "a" and a.get("href"):
-            self._a = {"href": a["href"], "start": self.size, "text": "", "aria": a.get("aria-label") or a.get("title") or ""}
+            self._a = {"href": a["href"], "start": self.size, "text": "", "aria": a.get("aria-label") or a.get("title") or "",
+                       "containers": list(reversed(self._open))}
         if tag == "img" and self._a is not None and a.get("alt"):
             self._a["text"] += " " + a["alt"]
         if tag == "time" and a.get("datetime"):
@@ -74,6 +78,12 @@ class _Page(HTMLParser):
         if tag in ("script", "style", "noscript", "svg", "template") and self._skip:
             self._skip -= 1
         elif tag in _BLOCK:
+            for i in range(len(self._open) - 1, -1, -1):      # close the nearest open element with this tag
+                if self._open[i]["tag"] == tag:
+                    for el in self._open[i:]:
+                        el["end"] = self.size
+                    del self._open[i:]
+                    break
             self._add("\n")
         if tag == "a" and self._a is not None:
             self._a["end"] = self.size
@@ -89,6 +99,16 @@ class _Page(HTMLParser):
 
     def text(self) -> str:
         return "".join(self.stream)
+
+    def cards(self, link: dict, limit: int = 1500) -> list[str]:
+        """The text of each block element around a link, smallest first, up to `limit` characters."""
+        full, out = self.text(), []
+        for el in link.get("containers", []):
+            end = el["end"] if el["end"] is not None else self.size
+            if end - el["start"] > limit:
+                break
+            out.append(full[el["start"]:end])
+        return out
 
 
 def read_page(fetcher: Fetcher, url: str) -> tuple[str, "_Page", str]:
@@ -203,8 +223,8 @@ def article(fetcher: Fetcher, url: str) -> dict:
             links.append({"href": href, "host": h.removeprefix("www."), "text": re.sub(r"\s+", " ", link["text"]).strip()})
     title = re.search(r"<title[^>]*>(.*?)</title>", raw, re.S | re.I)
     return {"url": final, "title": html_to_text(title.group(1)) if title else "", "text": html_to_text(raw), "date": published,
-            "links": links, "people_links": [{"href": urljoin(final, l["href"]), "block": _block(page, l, 160, 160)} for l in page.links
-                                             if "linkedin.com/in/" in l["href"]]}
+            "links": links, "people_links": [{"href": urljoin(final, l["href"]), "block": _block(page, l, 160, 160), "cards": page.cards(l)}
+                                             for l in page.links if "linkedin.com/in/" in l["href"]]}
 
 
 # ---------------------------------------------------------------- portfolio pages

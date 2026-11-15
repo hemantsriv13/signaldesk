@@ -85,23 +85,17 @@ def test_no_profile_url_for_names_without_a_link(engine, boards):
     assert [c["profile_url"] for c in all_contacts(engine.db)] == [None, None]
 
 
-KNOWN = ("KNOWN FAILURE, shown to the owner and not fixed yet: on a team page, the name regex runs across neighbouring "
-         "text, and each LinkedIn link goes to the first name in the 160 characters before it.")
-
-
-@pytest.mark.xfail(strict=True, reason=KNOWN)
 def test_one_person_on_a_team_page_is_stored_once_under_their_own_name(engine, boards):
     jid = posting_job(engine, boards, content="<p>Own quarterly planning.</p>")
     boards.routes[f"https://{DOMAIN_A}/about"] = (200, html(
         '<div><h3>Corwin Ashdale</h3><p>Co-founder and CEO</p>'
         '<a href="https://www.linkedin.com/in/corwin-ashdale-fixture">LinkedIn</a></div>'))
     contacts.discover_for_job(engine.db, engine.fetcher, jid)
-    # Today this stores "Corwin Ashdale" AND "Corwin Ashdale Co" (from "Co-founder"); the page names one person.
+    # Before the fix this also stored "Corwin Ashdale Co", built from "Co-founder" by flattening the page.
     assert [(c["name"], c["profile_url"]) for c in all_contacts(engine.db)] == [
         ("Corwin Ashdale", "https://www.linkedin.com/in/corwin-ashdale-fixture")]
 
 
-@pytest.mark.xfail(strict=True, reason=KNOWN)
 def test_a_neighbours_profile_link_is_never_given_to_someone_else(engine, boards):
     jid = posting_job(engine, boards, content="<p>Own quarterly planning.</p>")
     # Two people side by side. Only the second has a LinkedIn link.
@@ -111,17 +105,55 @@ def test_a_neighbours_profile_link_is_never_given_to_someone_else(engine, boards
         '<div><h3>Petra Lindqvane</h3><p>Head of Product</p>'
         '<a href="https://www.linkedin.com/in/petra-lindqvane-fixture">LinkedIn</a></div>'))
     contacts.discover_for_job(engine.db, engine.fetcher, jid)
-    # Today Petra's link is stored on a contact named "Corwin Ashdale Co".
+    # Before the fix Petra's link was stored on a contact named "Corwin Ashdale Co".
     wrong = [(c["name"], c["profile_url"]) for c in all_contacts(engine.db) if c["profile_url"] and owner[c["profile_url"]] != c["name"]]
     assert wrong == []
 
 
 def test_every_stored_name_appears_on_its_evidence_page_as_written(engine, boards):
-    """Holds for postings and announcements; the team-page case is the known failure above."""
+    """Postings, and (since the fix) team pages."""
     jid = posting_job(engine, boards, content="<p>You will report to Tamsin Orlowe, Head of Strategy.</p>")
     contacts.discover_for_job(engine.db, engine.fetcher, jid)
     for c in all_contacts(engine.db):
         assert c["name"] in c["evidence_text"]
+
+
+def team(engine, boards, body, path="/about", final=None):
+    jid = posting_job(engine, boards, content="<p>Own quarterly planning.</p>")
+    boards.routes[f"https://{DOMAIN_A}{path}"] = (200, html(body))
+    contacts.discover_for_job(engine.db, engine.fetcher, jid)
+    return {c["name"]: c for c in all_contacts(engine.db)}
+
+
+def test_link_before_the_name_in_the_same_card_is_kept(engine, boards):
+    got = team(engine, boards, '<div><a href="https://www.linkedin.com/in/corwin-ashdale-fixture">LinkedIn</a><h3>Corwin Ashdale</h3>'
+                               '<p>Co-founder and CEO</p></div><div><h3>Petra Lindqvane</h3><p>Head of Product</p></div>')
+    assert got["Corwin Ashdale"]["profile_url"] == "https://www.linkedin.com/in/corwin-ashdale-fixture"
+    assert got["Petra Lindqvane"]["profile_url"] is None and set(got) == {"Corwin Ashdale", "Petra Lindqvane"}
+
+
+def test_a_link_in_a_block_naming_several_people_goes_to_nobody(engine, boards):
+    got = team(engine, boards, '<div><h3>Corwin Ashdale</h3><p>Co-founder and CEO</p><h3>Petra Lindqvane</h3><p>Head of Product</p>'
+                               '<a href="https://www.linkedin.com/in/someone-fixture">LinkedIn</a></div>')
+    assert {n: c["profile_url"] for n, c in got.items()} == {"Corwin Ashdale": None, "Petra Lindqvane": None}
+
+
+def test_customer_quotes_naming_another_company_are_not_team_members(engine, boards):
+    """Seen on a real company page: executives of customers quoted on the page were stored as staff."""
+    got = team(engine, boards, '<div><p>"It changed how we bill."</p><p>Fenwick Harrow, Founder and CEO, Otherco</p></div>'
+                               '<div><h3>Corwin Ashdale</h3><p>Co-founder and CEO</p></div>')
+    assert set(got) == {"Corwin Ashdale"}
+
+
+def test_a_team_address_that_redirects_elsewhere_is_ignored(engine, boards, monkeypatch):
+    """Seen on a real company: /about redirected to the home page, whose quotes were read as the team."""
+    jid = posting_job(engine, boards, content="<p>Own quarterly planning.</p>")
+    boards.routes[f"https://{DOMAIN_A}/"] = (200, html("<div><h3>Corwin Ashdale</h3><p>Co-founder and CEO</p></div>"))
+    real = contacts.web.article
+    # The fetcher follows redirects and reports the final address; this page answers /about from the home page.
+    monkeypatch.setattr(contacts.web, "article", lambda f, url: {**real(f, f"https://{DOMAIN_A}/"), "url": f"https://{DOMAIN_A}/"})
+    contacts.discover_for_job(engine.db, engine.fetcher, jid)
+    assert all_contacts(engine.db) == []
 
 
 def test_manual_entry_keeps_only_what_you_typed(engine):
