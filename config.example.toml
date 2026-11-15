@@ -2,6 +2,21 @@
 # The data dir is %SIGNALDESK_HOME% if set, otherwise D:\LocalAI\signaldesk.
 # No credentials are needed: SignalDesk uses only public job APIs, public feeds and a local model.
 
+# Optional Project Coach: read-only local clones. Missing paths are reported, not fatal.
+# Relative paths resolve against the data home, not the shell's working directory.
+# [[project]]
+# name = "pushback"
+# path = 'C:\Users\Hemant\Documents\GitHub\pushback'
+# kind = "pushback"
+# [[project]]
+# name = "nextword"
+# path = 'C:\Users\Hemant\Documents\GitHub\nextword'
+# kind = "nextword"
+# [[project]]
+# name = "signaldesk"
+# path = 'C:\Users\Hemant\Documents\GitHub\signaldesk'
+# kind = "signaldesk"
+
 [server]
 host = "127.0.0.1"   # keep on localhost; the app has no login
 port = 8780

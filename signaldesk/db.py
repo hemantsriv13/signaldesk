@@ -425,7 +425,30 @@ def _migrate_followups(conn: sqlite3.Connection) -> None:
     conn.executescript(FOLLOWUP_TABLES)
 
 
-MIGRATIONS = [_migrate_v3, _migrate_v4, _migrate_pipeline, _migrate_followups]
+def _migrate_projects(conn: sqlite3.Connection) -> None:
+    conn.executescript("""
+    CREATE TABLE IF NOT EXISTS project_days (
+      day TEXT PRIMARY KEY, created_at TEXT NOT NULL, projects_json TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS project_tasks (
+      id TEXT PRIMARY KEY, day TEXT NOT NULL REFERENCES project_days(day),
+      project TEXT NOT NULL, kind TEXT NOT NULL, source_key TEXT NOT NULL,
+      payload_json TEXT NOT NULL, export_json TEXT NOT NULL,
+      skipped_at TEXT, created_at TEXT NOT NULL,
+      UNIQUE(day, project, source_key)
+    );
+    CREATE TABLE IF NOT EXISTS project_responses (
+      id TEXT PRIMARY KEY, task_id TEXT NOT NULL UNIQUE REFERENCES project_tasks(id),
+      project TEXT NOT NULL, source_key TEXT NOT NULL, verdict TEXT NOT NULL,
+      note TEXT NOT NULL, created_at TEXT NOT NULL,
+      input_origin TEXT NOT NULL CHECK(input_origin = 'human'),
+      UNIQUE(project, source_key)
+    );
+    CREATE INDEX IF NOT EXISTS project_tasks_day ON project_tasks(day);
+    """)
+
+
+MIGRATIONS = [_migrate_v3, _migrate_v4, _migrate_pipeline, _migrate_followups, _migrate_projects]
 
 
 class DB:

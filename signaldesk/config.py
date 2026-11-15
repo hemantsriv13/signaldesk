@@ -98,6 +98,13 @@ class ExperimentalConfig:
 
 
 @dataclass
+class ProjectConfig:
+    name: str
+    path: str
+    kind: str
+
+
+@dataclass
 class Config:
     home: Path
     server: ServerConfig = field(default_factory=ServerConfig)
@@ -108,6 +115,7 @@ class Config:
     auth: AuthConfig = field(default_factory=AuthConfig)
     experimental: ExperimentalConfig = field(default_factory=ExperimentalConfig)
     demo: bool = False                     # set only by --demo: synthetic data, no fetching, no model calls
+    project: list[ProjectConfig] = field(default_factory=list)
 
     @property
     def auth_path(self) -> Path:
@@ -152,6 +160,14 @@ def load_config(home: Path | None = None) -> Config:
         data = tomllib.loads(path.read_text(encoding="utf-8-sig"))   # Notepad and PowerShell 5 save UTF-8 with a BOM
         for section in ("server", "model", "fetch", "limits", "lan", "auth", "experimental"):
             _apply(getattr(cfg, section), data.get(section, {}))
+        seen = set()
+        for item in data.get("project", []):
+            if not all(isinstance(item.get(k), str) and item[k].strip() for k in ("name", "path", "kind")):
+                raise ValueError("Each [[project]] needs name, path and kind")
+            if item["kind"] not in ("pushback", "nextword", "signaldesk") or item["name"] in seen:
+                raise ValueError("Project names must be unique; kinds: pushback, nextword, signaldesk")
+            seen.add(item["name"])
+            cfg.project.append(ProjectConfig(**{k: item[k] for k in ("name", "path", "kind")}))
     for d in (cfg.home, cfg.logs_dir, cfg.digests_dir, cfg.evals_dir):
         d.mkdir(parents=True, exist_ok=True)
     return cfg
