@@ -724,7 +724,8 @@ class Engine:
         job = self.db.one("SELECT * FROM jobs WHERE id = ?", (c["job_id"],))
         profile = self.profiles.profile()
         fit = self.latest("job_fit", "job", job["id"])
-        facts = contacts.pick_facts(profile, job, fit)
+        from .gaps import accepted_order
+        facts = accepted_order(self.db, profile, job["id"])[:contacts.MAX_FACTS] or contacts.pick_facts(profile, job, fit)
         detail = contacts.pick_detail(job, facts)
         prompt = contacts.draft_prompt(c, job, facts, profile, detail)
         (note, msg), served, _esc = self._try_both(task, "outreach_draft", prompt, lambda d: contacts.validate_draft(d, c, job, facts, detail),

@@ -529,7 +529,8 @@ def ensure_draft(db: DB, contact_id: int, profile: dict, fit: dict | None) -> in
     row = db.one("SELECT id FROM outreach WHERE contact_id = ?", (contact_id,))
     if row:
         return row["id"]
-    facts = pick_facts(profile, job, fit)
+    from .gaps import accepted_order
+    facts = accepted_order(db, profile, job["id"])[:MAX_FACTS] or pick_facts(profile, job, fit)
     detail = pick_detail(job, facts)
     note, msg = template_draft(c, job, facts, detail)
     now = now_iso()

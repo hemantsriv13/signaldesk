@@ -12,6 +12,7 @@ import Cases from "@/pages/Cases"
 import Hiring from "@/pages/Hiring"
 import How from "@/pages/How"
 import Jobs from "@/pages/Jobs"
+import Gaps from "@/pages/Gaps"
 import Outreach from "@/pages/Outreach"
 import Pipeline from "@/pages/Pipeline"
 import Reading from "@/pages/Reading"
@@ -25,6 +26,7 @@ const NAV: { page: string; label: string; icon: ReactNode }[] = [
   { page: "today", label: "Today", icon: <SunIcon /> },
   { page: "jobs", label: "Jobs", icon: <BriefcaseIcon /> },
   { page: "pipeline", label: "Pipeline", icon: <CheckCircleIcon /> },
+  { page: "gaps", label: "Skill gaps", icon: <FlaskIcon /> },
   { page: "hiring", label: "Hiring companies", icon: <MagnifyingGlassIcon /> },
   { page: "outreach", label: "Outreach", icon: <LinkSimpleIcon /> },
   { page: "reading", label: "Reading", icon: <BookOpenIcon /> },
@@ -37,7 +39,7 @@ const NAV: { page: string; label: string; icon: ReactNode }[] = [
 ]
 
 const PAGES: Record<string, () => ReactNode> = {
-  today: () => <Today />, jobs: () => <Jobs />, pipeline: () => <Pipeline />, hiring: () => <Hiring />, funded: () => <Hiring />, outreach: () => <Outreach />, reading: () => <Reading />, cases: () => <Cases />, saved: () => <Saved />,
+  today: () => <Today />, jobs: () => <Jobs />, pipeline: () => <Pipeline />, gaps: () => <Gaps />, hiring: () => <Hiring />, funded: () => <Hiring />, outreach: () => <Outreach />, reading: () => <Reading />, cases: () => <Cases />, saved: () => <Saved />,
   runs: () => <Runs />, sources: () => <Sources />, settings: () => <Settings />, how: () => <How />,
 }
 

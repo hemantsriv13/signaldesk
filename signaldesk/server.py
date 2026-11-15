@@ -18,7 +18,7 @@ from pydantic import BaseModel
 
 import hmac
 
-from . import auth, collect, contacts, funding, hiring, jobrules, pipeline, registry, sweep
+from . import auth, collect, contacts, funding, gaps, hiring, jobrules, pipeline, registry, sweep
 from . import lan as lan_mod
 from . import panel as panel_api
 from .cv import MAX_BYTES, preview_cv
@@ -129,6 +129,9 @@ class RevokeBody(BaseModel):
 
 class PanelTokenBody(BaseModel):
     label: str = "Edge side panel"
+
+class LeadDecision(BaseModel):
+    accept: bool
 
 class SentBody(BaseModel):
     at: str = ""             # YYYY-MM-DD you sent it; empty means today
@@ -537,6 +540,20 @@ def create_app(engine: Engine, scheduler: Scheduler | None = None, delivery_env:
                                       (it["id"], it["stage"]))
         items.sort(key=lambda x: (pipeline.STAGES.index(x["stage"]), -(datetime.fromisoformat(x["last_event"]["at"]).timestamp() if x["last_event"] else 0)))
         return {**pipeline.summary(db), "items": items}
+
+    @app.get("/api/gaps")
+    def recurring_gaps():
+        return gaps.recurring(db, engine.profiles.profile(), engine.profiles.prefs().get("role_families", []))
+
+    @app.get("/api/jobs/{job_id}/lead-with")
+    def lead_with(job_id: int):
+        job_or_404(job_id)
+        return gaps.lead_with(db, engine.profiles.profile(), job_id)
+
+    @app.post("/api/jobs/{job_id}/lead-with")
+    def lead_with_decision(job_id: int, body: LeadDecision):
+        job_or_404(job_id)
+        return gaps.decide(db, engine.profiles.profile(), job_id, body.accept)
 
     @app.get("/api/actions")
     def todays_actions():

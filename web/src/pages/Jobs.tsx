@@ -343,6 +343,7 @@ function JobView({ id, onChange }: { id: number; onChange: () => void }) {
 
       {/* Keyed by stage, so after you record a step the form offers the next one. */}
       <StageSection key={`${j.id}-${j.stage}`} job={j} onChange={() => { reload(); onChange() }} />
+      <LeadWithSection jobId={j.id} />
       <ContactsSection job={j} onChange={reload} />
       <FundingSection f={j.funding} />
 
@@ -446,6 +447,26 @@ function StageSection({ job, onChange }: { job: JobDetail; onChange: () => void 
           <li key={e.id}><span className="font-medium">{e.stage}</span> <span className="text-muted-foreground">· {e.dated ? day(e.at) : "date unknown"}</span>
             {e.note && <span> · {e.note}</span>}</li>))}</ol>
       )}
+    </Section>
+  )
+}
+
+interface LeadWith { suggested: { id: string; text: string; why: string }[]; decision: { decision: string } | null; analysed: boolean }
+
+/** Your existing facts in a suggested order for this job. Accepting applies to this job's drafts only. */
+function LeadWithSection({ jobId }: { jobId: number }) {
+  const { data, reload } = useApi<LeadWith>(`/api/jobs/${jobId}/lead-with`)
+  if (!data) return null
+  const decide = async (accept: boolean) => { await api.send(`/api/jobs/${jobId}/lead-with`, "POST", { accept }); reload() }
+  return (
+    <Section title="Lead with" aside={data.decision ? <Pill tone="neutral">{data.decision.decision === "accepted" ? "Accepted" : "Rejected"}</Pill> : undefined}>
+      <p className="max-w-[75ch] text-sm text-muted-foreground">Your own facts, unchanged, in the order that fits this role{data.analysed ? "" : " (no fit analysis yet, so by shared words only)"}. Accepting changes only the drafts for this role, not your profile.</p>
+      <ol className="flex list-decimal flex-col gap-1.5 ps-5 text-sm">{data.suggested.slice(0, 4).map((f) => (
+        <li key={f.id}><span>{f.text}</span> <span className="text-xs text-muted-foreground">({f.id}. {f.why})</span></li>))}</ol>
+      <div className="flex gap-2">
+        <Button size="sm" variant="outline" onClick={() => decide(true)}>Accept this order</Button>
+        <Button size="sm" variant="ghost" onClick={() => decide(false)}>Reject</Button>
+      </div>
     </Section>
   )
 }
