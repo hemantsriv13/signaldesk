@@ -71,7 +71,7 @@ def _file_sources(home: Path) -> list[dict]:
     path = home / "sources.toml"
     if not path.exists():
         return []
-    data = tomllib.loads(path.read_text(encoding="utf-8"))
+    data = tomllib.loads(path.read_text(encoding="utf-8-sig"))
     return [s for s in data.get("source", []) if isinstance(s, dict) and s.get("key")]
 
 

@@ -149,7 +149,7 @@ def load_config(home: Path | None = None) -> Config:
     cfg = Config(home=home)
     path = home / "config.toml"
     if path.exists():
-        data = tomllib.loads(path.read_text(encoding="utf-8"))
+        data = tomllib.loads(path.read_text(encoding="utf-8-sig"))   # Notepad and PowerShell 5 save UTF-8 with a BOM
         for section in ("server", "model", "fetch", "limits", "lan", "auth", "experimental"):
             _apply(getattr(cfg, section), data.get(section, {}))
     for d in (cfg.home, cfg.logs_dir, cfg.digests_dir, cfg.evals_dir):

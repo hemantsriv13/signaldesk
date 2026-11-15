@@ -127,3 +127,10 @@ def test_side_panel_api_is_refused_by_default(engine):
     assert c.get("/api/panel/ping").status_code == 403
     assert c.post("/api/panel/tokens", json={"label": "x"}).status_code == 403
     assert not engine.db.scalar("SELECT COUNT(*) FROM panel_tokens")
+
+
+def test_config_saved_with_a_bom_still_loads(tmp_path):
+    """Notepad and Windows PowerShell 5 save UTF-8 with a byte-order mark; that must not stop SignalDesk."""
+    (tmp_path / "config.toml").write_bytes("﻿[server]\nport = 8799\n\n[experimental]\ncontacts = true\n".encode("utf-8"))
+    cfg = load_config(tmp_path)
+    assert cfg.server.port == 8799 and cfg.experimental.contacts is True
