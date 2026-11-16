@@ -105,10 +105,20 @@ class CoachConfig:
 
 
 @dataclass
+class WritebackConfig:
+    """Writing your answers into the project clones, on a phone-review branch. A repo is written
+    only once its name is in `write`, and pushed only once it is also in `push`. Never main."""
+    write: list[str] = field(default_factory=list)
+    push: list[str] = field(default_factory=list)
+    auto: bool = False                     # also run from the background loop (at most every 30 minutes)
+
+
+@dataclass
 class ProjectConfig:
     name: str
     path: str
     kind: str
+    check_python: str = ""                 # interpreter for the repo's own checks; empty = this one
 
 
 @dataclass
@@ -122,6 +132,7 @@ class Config:
     auth: AuthConfig = field(default_factory=AuthConfig)
     experimental: ExperimentalConfig = field(default_factory=ExperimentalConfig)
     coach: CoachConfig = field(default_factory=CoachConfig)
+    writeback: WritebackConfig = field(default_factory=WritebackConfig)
     demo: bool = False                     # set only by --demo: synthetic data, no fetching, no model calls
     project: list[ProjectConfig] = field(default_factory=list)
 
@@ -166,7 +177,7 @@ def load_config(home: Path | None = None) -> Config:
     path = home / "config.toml"
     if path.exists():
         data = tomllib.loads(path.read_text(encoding="utf-8-sig"))   # Notepad and PowerShell 5 save UTF-8 with a BOM
-        for section in ("server", "model", "fetch", "limits", "lan", "auth", "experimental", "coach"):
+        for section in ("server", "model", "fetch", "limits", "lan", "auth", "experimental", "coach", "writeback"):
             _apply(getattr(cfg, section), data.get(section, {}))
         seen = set()
         for item in data.get("project", []):
@@ -175,7 +186,9 @@ def load_config(home: Path | None = None) -> Config:
             if item["kind"] not in ("pushback", "nextword", "signaldesk") or item["name"] in seen:
                 raise ValueError("Project names must be unique; kinds: pushback, nextword, signaldesk")
             seen.add(item["name"])
-            cfg.project.append(ProjectConfig(**{k: item[k] for k in ("name", "path", "kind")}))
+            if not isinstance(item.get("check_python", ""), str):
+                raise ValueError("check_python must be a path to a Python interpreter")
+            cfg.project.append(ProjectConfig(**{k: item[k] for k in ("name", "path", "kind")}, check_python=item.get("check_python", "")))
     for d in (cfg.home, cfg.logs_dir, cfg.digests_dir, cfg.evals_dir):
         d.mkdir(parents=True, exist_ok=True)
     return cfg

@@ -41,3 +41,21 @@ Step 2 cloud sync (needs owner to run SQL), Step 3 phone tab, Step 4 notificatio
 ```
 Owner rules: ask before live Supabase changes, first write/push in pushback or nextword, any push to
 main, merge, scheduled task, firewall/LAN/tunnel changes. Nothing private in Git or logs.
+
+## Update 2026-11-16 (later) — Steps 2–4 built, Part 3 built and stopped by real checks
+- Step 2: cloud/project_coach.sql (NOT yet run on live Supabase — owner must run it), coach_sync.py,
+  verify_cloud.py --projects. Mocked tests only; live RLS unverified.
+- Step 3: phone Projects tab + offline queue + sign-out clearing. 14/14 scripted checks pass at 390px
+  light and dark against a local Supabase stand-in (online, offline queue, reopen offline, reconnect,
+  no duplicates, sign-out warning and clearing). Not tested on a real phone. APK built 15:15:
+  web\android\app\build\outputs\apk\debug\app-debug.apk (no secret keys in the bundle).
+- Step 4: Android local reminders (off by default, generic text). Only the build is verified.
+- Part 3: writeback.py (worktree on phone-review, allow-list, human cells only, checks, approvals in
+  [writeback] write/push). 9 git-based tests pass. Dry run on scratch copies with the REAL checks:
+  * pushback: test_evidence_provenance pins label CSV hashes in reports/run-provenance.json, so any
+    write to an existing sheet fails its own tests. Only unpinned (new) sheets can be written.
+  * nextword: test_committed_sheets_are_blank_and_match_the_generator requires committed sheets to
+    stay blank, so filled verdicts fail its own tests on any branch.
+  Both stops were correct (nothing committed). Owner decision needed before any real write.
+- No real clone was written; copy holds 2 TEST answers, fixture home 1 — never write those back.
+- Part 4 (LAN/Tailscale) and Part 5 not started. Pushes, SQL, migrations all wait on the owner.

@@ -8,6 +8,7 @@ import os
 import re
 import threading
 import uuid
+from datetime import datetime, timezone
 from urllib.parse import urlsplit
 import httpx
 from . import coach_sync
@@ -128,7 +129,22 @@ class Delivery:
             state.update(cloud='synced', fingerprint=fingerprint, remote_id=remote_id, synced_at=now_iso())
             self.db.set_setting(f'delivery:{row["id"]}', state)
 
+    def writeback_tick(self):
+        """[writeback] auto: write approved repos at most every 30 minutes. Off by default."""
+        from . import writeback
+        cfg = self.engine.cfg
+        if not (cfg.writeback.auto and cfg.writeback.write and cfg.project):
+            return
+        last = self.db.get_setting('writeback_last_run')
+        if last and (datetime.now(timezone.utc) - datetime.fromisoformat(last)).total_seconds() < writeback.AUTO_EVERY_SECONDS:
+            return
+        try:
+            writeback.run(cfg, self.db)
+        except Exception:
+            self.db.set_setting('writeback_last_run', now_iso())
+
     def _loop(self):
         while not self.stop.is_set():
             self.tick()
+            self.writeback_tick()
             self.stop.wait(60)

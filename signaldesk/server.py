@@ -555,6 +555,11 @@ def create_app(engine: Engine, scheduler: Scheduler | None = None, delivery_env:
         except ValueError as e:
             raise HTTPException(400, str(e)) from None
 
+    @app.post("/api/projects/writeback")
+    def project_writeback():
+        from . import writeback
+        return {"results": writeback.run(cfg, db)}
+
     @app.post("/api/projects/export")
     def project_export():
         try:

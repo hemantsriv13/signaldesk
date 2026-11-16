@@ -543,7 +543,8 @@ def today(db: DB, now: datetime | None = None):
     progress = {r["project"]: r["n"] for r in db.all("SELECT project,COUNT(*) n FROM project_responses WHERE julianday(created_at)>=julianday(?) GROUP BY project", (start,))}
     return {"day": day, "prepared": bool(saved), "projects": json.loads(saved["projects_json"]) if saved else [],
             "tasks": tasks, "reminders": reminders, "done_this_week": progress,
-            "cloud": db.get_setting("coach_sync_status"), "phone_conflicts": (db.get_setting("coach_conflicts") or [])[-5:]}
+            "cloud": db.get_setting("coach_sync_status"), "phone_conflicts": (db.get_setting("coach_conflicts") or [])[-5:],
+            "written_today": [e for e in (db.get_setting("writeback_log") or []) if e["at"][:10] == datetime.now(timezone.utc).date().isoformat()][-10:]}
 
 
 def respond(db: DB, task_id: str, verdict: str, note: str, *, response_id: str | None = None, via: str = "desktop",
@@ -656,12 +657,17 @@ def export_responses(cfg: Config, db: DB):
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description="Project Coach: local review tasks and staged human exports")
-    parser.add_argument("action", choices=["collect", "export"])
+    parser.add_argument("action", choices=["collect", "export", "writeback"])
     parser.add_argument("--home", required=True, type=Path, help="Explicit copied data home; never use live data for verification")
     args = parser.parse_args(argv)
     cfg = load_config(args.home)
     db = DB(cfg.db_path)
     try:
+        if args.action == "writeback":
+            from . import writeback
+            for r in writeback.run(cfg, db):
+                print(f"{r['project']}: {r['status']}. {r['message']}")
+            return 0
         if args.action == "collect":
             result = prepare(cfg, db)
             print(f"Daily batch: {len(result['tasks'])} review tasks, {len(result['reminders'])} laptop reminders. No model called.")

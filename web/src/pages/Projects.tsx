@@ -21,6 +21,7 @@ interface Batch {
   done_this_week: Record<string, number>
   cloud: { at: string; state: "checked" | "failed"; message?: string; pushed?: number } | null
   phone_conflicts: { at: string; project: string | null; phone_verdict: string; kept: string | null }[]
+  written_today: { at: string; project: string; status: string; message: string; branch: string; commit: string | null; files: string[]; pushed: boolean }[]
 }
 
 export default function Projects() {
@@ -35,6 +36,12 @@ export default function Projects() {
     setBusy(true); setFailure(""); setMessage("")
     try { setData(await api.send<Batch>("/api/projects/collect", "POST", {})) }
     catch (e) { setFailure(e instanceof Error ? e.message : String(e)) }
+    finally { setBusy(false) }
+  }
+  async function writeBack() {
+    setBusy(true); setExportError(""); setMessage("")
+    try { await api.send("/api/projects/writeback", "POST", {}); await reload() }
+    catch (e) { setExportError(e instanceof Error ? e.message : String(e)) }
     finally { setBusy(false) }
   }
   async function exportAnswers() {
@@ -78,6 +85,14 @@ export default function Projects() {
           {(p.notice || p.git_error) && <p className="text-sm text-(--warning-text)">{p.notice || p.git_error}</p>}
         </li>)}</ul>
         {!data.projects.length && <p className="text-sm">No projects configured. Add [[project]] entries to config.toml and restart. They will be collected in the next daily batch.</p>}
+      </Section>
+      <Section title="Written to your projects today">
+        {data.written_today.length ? <ul className="flex max-w-3xl flex-col gap-3">{data.written_today.map(e => <li key={e.at + e.project} className="flex flex-col gap-1 text-sm">
+          <span className="font-semibold">{e.project}</span>
+          <span>{e.message}</span>
+          {e.commit && <span className="text-muted-foreground">Branch {e.branch} · commit {e.commit} · {e.files.join(", ")} · {e.pushed ? "pushed, ready for you to merge" : "on this laptop only"}</span>}
+        </li>)}</ul> : <p className="text-sm text-muted-foreground">Nothing written today. Answers go to a phone-review branch only for repos you allow in config.toml.</p>}
+        <div><Button className="min-h-11" variant="outline" disabled={busy} onClick={writeBack}>Write answers to projects</Button></div>
       </Section>
       <Section title="Your answers">
         <p className="max-w-3xl text-sm text-muted-foreground">Exports go to the data folder. Importing them into another project remains a separate laptop action.</p>

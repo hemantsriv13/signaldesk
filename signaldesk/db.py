@@ -454,7 +454,15 @@ def _migrate_project_sync(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE project_responses ADD COLUMN via TEXT NOT NULL DEFAULT 'desktop'")
 
 
-MIGRATIONS = [_migrate_v3, _migrate_v4, _migrate_pipeline, _migrate_followups, _migrate_projects, _migrate_project_sync]
+def _migrate_project_writes(conn: sqlite3.Connection) -> None:
+    # One row per answer the write-back has handled: written, already there, conflict or missing.
+    conn.executescript("""CREATE TABLE IF NOT EXISTS project_writes (
+        response_id TEXT PRIMARY KEY, project TEXT NOT NULL, result TEXT NOT NULL,
+        commit_sha TEXT, branch TEXT, file TEXT, written_at TEXT NOT NULL, pushed_at TEXT)""")
+
+
+MIGRATIONS = [_migrate_v3, _migrate_v4, _migrate_pipeline, _migrate_followups, _migrate_projects, _migrate_project_sync,
+              _migrate_project_writes]
 
 
 class DB:
