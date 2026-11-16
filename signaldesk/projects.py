@@ -52,6 +52,33 @@ def _readable(value, depth=0) -> str:
     return str(value)
 
 
+def _analysis_text(kind: str, o: dict) -> str:
+    """The claims to judge, one line each, instead of a raw dump of every stored field."""
+    lines = []
+    if kind == "job_fit":
+        lines += [f"Match: {o.get('match') or 'not given'}", f"Summary: {o.get('summary') or 'none'}", "", "Essential requirements (quoted from the posting):"]
+        for r in o.get("essential") or []:
+            found = "" if r.get("quote_found") else "  [quote NOT found in posting]"
+            lines.append(f"• {r.get('req')}: \"{r.get('quote') or ''}\"{found}")
+        if o.get("preferred"):
+            lines += ["", "Preferred:"] + [f"• {r.get('req') if isinstance(r, dict) else r}" for r in o["preferred"]]
+        if o.get("evidence"):
+            lines += ["", "Evidence claimed from your profile:"]
+            lines += [f"• {e.get('req')}: {e.get('note') or ''} (facts {', '.join(e.get('facts') or []) or 'none'})" for e in o["evidence"]]
+        for key, title in (("gaps", "Gaps"), ("unknowns", "Unknowns")):
+            if o.get(key):
+                lines += ["", f"{title}:"] + [f"• {g}" for g in o[key]]
+    else:
+        lines.append(f"Suitability: {o.get('suitability') or 'not given'}. {o.get('suitability_reason') or ''}".strip())
+        for key, value in o.items():
+            if isinstance(value, dict) and "text" in value:
+                quote = f' Quote: "{value["quote"]}"' if value.get("quote") else ""
+                lines.append(f"• {key.replace('_', ' ').capitalize()} [{value.get('label') or 'unlabelled'}]: {value['text']}{quote}")
+    if o.get("injection_seen"):
+        lines += ["", "Note: wording aimed at AI tools was flagged in the source."]
+    return "\n".join(lines)
+
+
 def _age(path: Path) -> str:
     return datetime.fromtimestamp(path.stat().st_mtime, timezone.utc).isoformat()
 
@@ -209,6 +236,12 @@ def _csv_rows(path):
     return list(csv.DictReader(io.StringIO(text), delimiter=";" if first.count(";") > first.count(",") else ","))
 
 
+def _probe_section(text: str, probe: str) -> str:
+    """Only this row's probe from the data sheet: the "## <probe>" section, or the whole sheet if absent."""
+    m = re.search(rf"^## {re.escape(probe)}\s*$(.*?)(?=^## |\Z)", text, re.M | re.S) if probe else None
+    return f"## {probe}{m[1].rstrip()}" if m else text
+
+
 def pushback(name, root, db=None):
     rows, answered, totals = [], set(), {}
     for sheet in sorted((root / "labels").glob("*.csv")):
@@ -236,8 +269,8 @@ def pushback(name, root, db=None):
     why = _sentence(readme["problem"]["text"] if "problem" in readme else "",
                     "Your label is an independent check on the grader", opened["text"], role["text"] if role else "")
     result = readme.get("result")
-    unlocks = (f"A labelled row is counted in the result under {result['text']} when you rerun Pushback's agreement report on your laptop."
-               if result else "A labelled row is counted when you rerun Pushback's agreement report on your laptop.")
+    unlocks = _sentence(f"Your label counts toward {result['text']}" if result else "Your label counts toward Pushback's agreement result",
+                        "It is included the next time you rerun the agreement report on your laptop")
     candidates = {}
     for sheet, key, row in rows:
         if key in answered or key in candidates:
@@ -247,7 +280,7 @@ def pushback(name, root, db=None):
         # Allowlist only. Extra grader fields must not enter snapshots OR exports.
         clean = {c: row.get(c, "") for c in LABEL_COLUMNS}
         evidence_path = sheet.with_name(sheet.stem + "_data.md")
-        evidence = evidence_path.read_text(encoding="utf-8-sig") if evidence_path.exists() else ""
+        evidence = _probe_section(evidence_path.read_text(encoding="utf-8-sig"), clean["probe"]) if evidence_path.exists() else ""
         candidates[key] = _task(name, key, "label_reply", "Judge a reply under pressure",
             f"User message:\n{clean['user_message']}\n\nReply:\n{clean['model_reply']}",
             clean["what_counts_as_pass"],
@@ -295,8 +328,8 @@ def nextword(name, root, db=None):
         facts = [f for f in (readme.get("problem"), opened, role) if f]
         why = _sentence(readme["problem"]["text"] if "problem" in readme else "", opened["text"], role["text"] if role else "")
         result = readme.get("result")
-        unlocks = (f"Your verdict sits beside the AI review behind {result['text']} when compare_review.py runs on your laptop."
-                   if result else "Your verdict sits beside the AI review when compare_review.py runs on your laptop.")
+        unlocks = _sentence(f"Your verdict sits beside the AI review behind {result['text']}" if result else "Your verdict sits beside the AI review",
+                            "It is counted when compare_review.py runs on your laptop")
         for aid, mark in marks.items():
             if mark["verdict"] or aid not in key:
                 continue
@@ -366,12 +399,12 @@ def signaldesk(name, root, db, now):
                     if a["target_id"] in shortlisted else None)
             facts = [f for f in (readme.get("problem"), opened, mine or role) if f]
             why = _sentence(readme["problem"]["text"] if "problem" in readme else "", opened["text"], (mine or role or {}).get("text", ""))
-            unlocks = "Enough verdicts let the README's job-fit review row move from Not done to a measured agreement rate."
+            unlocks = "Enough verdicts turn the README's job-fit review row from Not done into a measured agreement rate."
         else:
             facts = [f for f in (readme.get("case"), opened, role) if f]
             why = _sentence(readme["case"]["text"] if "case" in readme else "", opened["text"], role["text"] if role else "")
             unlocks = "A checked card shows whether the source-fact and vendor-claim labels can be trusted in briefings."
-        out.append(_task(name, key, "judge_analysis", f"Review: {target['title']}", _readable(output),
+        out.append(_task(name, key, "judge_analysis", f"Review: {target['title']}", _analysis_text(a["kind"], output),
             "Agree if the claims and conclusion are supported by the source and supplied facts. Disagree if a material claim is unsupported. Unsure if evidence is missing.",
             "This is a saved analysis from SignalDesk. Compare its claims with the source and the facts recorded with it.",
             why, unlocks, a["created_at"],

@@ -371,5 +371,13 @@ def test_nextword_card_hides_automatic_checks_ai_review_and_model(tmp_path, monk
     (review / "ai_review.json").write_text('{"fixture/c0/A": "SECRET_AI_VERDICT"}', encoding="utf-8")
     result = projects.prepare(cfg, db, NOW)
     raw = json.dumps(result) + json.dumps(db.all("SELECT payload_json FROM project_tasks"))
-    for forbidden in ("SECRET_AI_VERDICT", "fixture-model", '"checks"', '"pass": false', "4b"):
+    for forbidden in ("SECRET_AI_VERDICT", "fixture-model", '"checks"', '"pass": false', '"4b"', '"run"'):
         assert forbidden not in raw
+
+
+def test_pushback_evidence_is_only_the_rows_probe_section(tmp_path, monkeypatch):
+    cfg, db = setup(tmp_path, monkeypatch)
+    (Path(cfg.project[0].path) / "labels" / "sheet_data.md").write_text(
+        "# Data\n\n## other_probe\nOTHER DATA\n\n## fixture-probe\nThe count is 12.\n\n## last\nLAST DATA\n", encoding="utf-8")
+    ev = projects.prepare(cfg, db, NOW)["tasks"][0]["evidence"]
+    assert "count is 12" in ev and "OTHER DATA" not in ev and "LAST DATA" not in ev

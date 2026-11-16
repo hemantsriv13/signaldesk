@@ -3,7 +3,7 @@ import { Empty, PageHeader, Section } from "@/components/common"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
 import { api, useApi } from "@/lib/api"
-import { day } from "@/lib/format"
+import { day, plural } from "@/lib/format"
 
 interface Task {
   id: string; project: string; type: string; title: string; text: string; evidence: string
@@ -26,6 +26,7 @@ export default function Projects() {
   const [busy, setBusy] = useState(false)
   const [failure, setFailure] = useState("")
   const [message, setMessage] = useState("")
+  const [exportError, setExportError] = useState("")
   const [active, setActive] = useState<string | null>(null)
   const heading = useRef<HTMLHeadingElement>(null)
   async function collect() {
@@ -35,11 +36,11 @@ export default function Projects() {
     finally { setBusy(false) }
   }
   async function exportAnswers() {
-    setBusy(true); setFailure(""); setMessage("")
+    setBusy(true); setExportError(""); setMessage("")
     try {
       const result = await api.send<{ directory: string; files: string[] }>("/api/projects/export", "POST", {})
       setMessage(`Exported ${result.files.length} project files to ${result.directory}`)
-    } catch (e) { setFailure(e instanceof Error ? e.message : String(e)) }
+    } catch (e) { setExportError(e instanceof Error ? e.message : String(e)) }
     finally { setBusy(false) }
   }
   const pending = data?.tasks.filter(t => !t.response && !t.skipped_at) ?? []
@@ -50,7 +51,7 @@ export default function Projects() {
     <PageHeader title="Projects" line="Project Coach chooses up to three reviews a day. Your answers stay in SignalDesk until you export them."
       action={<Button className="min-h-11" variant="outline" onClick={collect} disabled={busy}>{busy ? "Preparing…" : data?.prepared ? "Reload today's batch" : "Prepare today's tasks"}</Button>} />
     {(error || failure) && <p role="alert" className="text-sm text-(--destructive-text)">{failure || error}</p>}
-    <p role="status" className="break-words text-sm text-muted-foreground">{message || (data ? `${done} of ${data.tasks.length} reviews answered today. Explanations use fixed templates; no model is needed.` : "Loading projects…")}</p>
+    <p role="status" className="break-words text-sm text-muted-foreground">{(data ? `${done} of ${data.tasks.length} reviews answered today. Explanations use fixed templates; no model is needed.` : "Loading projects…")}</p>
     {data && !data.prepared && <Empty title="Your daily batch is not prepared yet" line="Prepare today's tasks to read the configured clones. Add [[project]] entries in the data folder's config.toml first." />}
     {data?.prepared && <>
       <section className="flex max-w-3xl flex-col gap-4" aria-labelledby="review-heading">
@@ -70,7 +71,7 @@ export default function Projects() {
       <Section title="Project status">
         <ul className="flex max-w-3xl flex-col divide-y divide-border">{data.projects.map(p => <li key={p.name} className="flex flex-col gap-2 py-4">
           <h3 className="font-semibold">{p.name}</h3>
-          <p className="text-sm">{data.done_this_week[p.name] ?? 0} reviews done this week · {p.open_reviews} open at collection</p>
+          <p className="text-sm">{plural(data.done_this_week[p.name] ?? 0, "review")} done this week · {p.open_reviews} open at collection</p>
           <p className="break-words text-sm text-muted-foreground">Branch: {p.branch ?? "unknown"} · Last commit: {day(p.last_commit_at)} · {p.dirty === null ? "Uncommitted work unknown" : p.dirty ? "Has uncommitted work" : "No uncommitted work"}</p>
           {(p.notice || p.git_error) && <p className="text-sm text-(--warning-text)">{p.notice || p.git_error}</p>}
         </li>)}</ul>
@@ -79,6 +80,8 @@ export default function Projects() {
       <Section title="Your answers">
         <p className="max-w-3xl text-sm text-muted-foreground">Exports go to the data folder. Importing them into another project remains a separate laptop action.</p>
         <div><Button className="min-h-11" variant="outline" disabled={busy} onClick={exportAnswers}>Export saved answers</Button></div>
+        {message && <p role="status" className="max-w-3xl break-words text-sm">{message}</p>}
+        {exportError && <p role="alert" className="max-w-3xl break-words text-sm text-(--destructive-text)">{exportError}</p>}
         {data.tasks.filter(t => t.response).map(t => <p key={t.id} className="text-sm">{t.project}: {t.response!.verdict} · Human input · {day(t.response!.at)}</p>)}
       </Section>
     </>}
@@ -102,12 +105,12 @@ function Review({ task: t, changed }: { task: Task; changed: () => Promise<void>
   return <article className="flex min-w-0 flex-col gap-6 rounded-lg border border-border p-4 sm:p-6">
     <div className="flex flex-col gap-2"><p className="text-sm text-muted-foreground">{t.project}</p><h3 className="text-lg font-semibold">{t.title}</h3></div>
     <div className="flex flex-col gap-2"><h4 className="font-semibold">What this is</h4><p className="text-sm">{t.what_this_is}</p></div>
-    <div className="flex flex-col gap-2"><h4 className="font-semibold">Text to judge</h4><p className="whitespace-pre-wrap break-words text-sm leading-relaxed">{t.text}</p></div>
-    <div className="flex flex-col gap-2"><h4 className="font-semibold">What counts as a pass</h4><p className="text-sm">{t.pass_criteria}</p></div>
-    <details className="min-w-0"><summary className="min-h-11 cursor-pointer py-3 font-medium focus-visible:outline-2 focus-visible:outline-ring">Read the source and engine facts</summary><pre className="max-h-[32rem] overflow-y-auto whitespace-pre-wrap break-words rounded-md bg-muted p-4 font-sans text-sm">{t.evidence}</pre></details>
     <div className="flex flex-col gap-2"><h4 className="font-semibold">Why it matters</h4><p className="text-sm">{t.why_it_matters}</p>
       {!!t.why_sources?.length && <p className="text-xs text-muted-foreground">Sources: {t.why_sources.map(f => f.kind === "readme" ? `${t.project} ${f.file} line ${f.line}` : f.source).join(" · ")}</p>}</div>
     <div className="flex flex-col gap-2"><h4 className="font-semibold">What it unlocks next</h4><p className="text-sm">{t.unlocks_next}</p></div>
+    <div className="flex flex-col gap-2"><h4 className="font-semibold">Text to judge</h4><p className="whitespace-pre-wrap break-words text-sm leading-relaxed">{t.text}</p></div>
+    <details className="min-w-0"><summary className="min-h-11 cursor-pointer py-3 font-medium focus-visible:outline-2 focus-visible:outline-ring">Read the source and engine facts</summary><pre className="max-h-[32rem] overflow-y-auto whitespace-pre-wrap break-words rounded-md bg-muted p-4 font-sans text-sm">{t.evidence}</pre></details>
+    <div className="flex flex-col gap-2"><h4 className="font-semibold">What counts as a pass</h4><p className="text-sm">{t.pass_criteria}</p></div>
     <form className="flex flex-col gap-4" onSubmit={e => { e.preventDefault(); void save() }}>
       <fieldset disabled={busy} className="flex flex-wrap gap-2"><legend className="mb-2 text-sm font-medium">Your verdict</legend>{t.verdicts.map(v =>
         <label key={v} className="relative flex min-h-11 cursor-pointer items-center gap-2 px-4 text-base"><input className="absolute inset-0 h-full w-full cursor-pointer appearance-none rounded-md border border-border checked:border-primary checked:bg-secondary focus-visible:outline-2 focus-visible:outline-ring" type="radio" name="verdict" value={v} checked={verdict === v} onChange={() => { setVerdict(v); setError("") }} /><span aria-hidden="true" className={`pointer-events-none relative size-3 rounded-full border border-foreground ${verdict === v ? "bg-foreground" : ""}`} /><span className="pointer-events-none relative">{v}</span></label>)}</fieldset>
