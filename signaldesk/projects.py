@@ -52,7 +52,7 @@ def _readable(value, depth=0) -> str:
     return str(value)
 
 
-def _analysis_text(kind: str, o: dict) -> str:
+def _analysis_text(kind: str, o: dict, for_phone: bool = False) -> str:
     """The claims to judge, one line each, instead of a raw dump of every stored field."""
     lines = []
     if kind == "job_fit":
@@ -62,7 +62,9 @@ def _analysis_text(kind: str, o: dict) -> str:
             lines.append(f"• {r.get('req')}: \"{r.get('quote') or ''}\"{found}")
         if o.get("preferred"):
             lines += ["", "Preferred:"] + [f"• {r.get('req') if isinstance(r, dict) else r}" for r in o["preferred"]]
-        if o.get("evidence"):
+        if o.get("evidence") and for_phone:
+            lines += ["", f"Evidence claimed from your profile: {len(o['evidence'])} item(s), shown on your laptop only."]
+        elif o.get("evidence"):
             lines += ["", "Evidence claimed from your profile:"]
             lines += [f"• {e.get('req')}: {e.get('note') or ''} (facts {', '.join(e.get('facts') or []) or 'none'})" for e in o["evidence"]]
         for key, title in (("gaps", "Gaps"), ("unknowns", "Unknowns")):
@@ -77,6 +79,30 @@ def _analysis_text(kind: str, o: dict) -> str:
     if o.get("injection_seen"):
         lines += ["", "Note: wording aimed at AI tools was flagged in the source."]
     return "\n".join(lines)
+
+
+PHONE_FIELDS = ("project", "type", "title", "text", "pass_criteria", "what_this_is", "why_it_matters", "why_sources",
+                "unlocks_next", "evidence", "verdicts", "source_at")
+PHONE_EVIDENCE_CHARS = 4000
+
+
+def _phone_variant(kind: str, output: dict, target: dict, text: str | None) -> dict:
+    """What the cloud copy may hold for a SignalDesk card: no profile-fact notes, no full article,
+    the public posting capped. The laptop page keeps the full version."""
+    if kind == "job_fit":
+        posting = (text or "Posting text unavailable")[:PHONE_EVIDENCE_CHARS]
+        evidence = f"Posting text (first {PHONE_EVIDENCE_CHARS:,} characters):\n{posting}"
+    else:
+        evidence = f"The full article stays on your laptop. Original: {target.get('url') or 'not recorded'}"
+    return {"text": _analysis_text(kind, output, for_phone=True), "evidence": evidence}
+
+
+def phone_card(payload: dict) -> dict:
+    """The phone-safe card for one stored task payload."""
+    card = {k: payload.get(k) for k in PHONE_FIELDS}
+    card.update(payload.get("phone") or {})
+    card["evidence"] = (card.get("evidence") or "")[:20000]
+    return card
 
 
 def _age(path: Path) -> str:
@@ -200,7 +226,7 @@ def _sentence(*parts) -> str:
 
 
 def _task(project, key, kind, title, text, criteria, what, why, unlocks, age, export=None, evidence="", blocking=True,
-          facts=None, root=None):
+          facts=None, root=None, phone=None):
     if kind != "laptop_reminder":
         check_why(why, facts or [], root)
     return {"project": project, "source_key": key, "type": kind, "title": title,
@@ -208,7 +234,7 @@ def _task(project, key, kind, title, text, criteria, what, why, unlocks, age, ex
             "why_sources": [{k: f[k] for k in ("kind", "text", "source", "file", "line") if k in f} for f in facts or []],
             "unlocks_next": unlocks, "evidence": evidence, "source_at": _utc(age),
             "result_blocking": blocking, "explanation_by": "template", "verdicts": VERDICTS[kind],
-            "_export": export or {}}
+            "phone": phone, "_export": export or {}}
 
 
 def _utc(at: str) -> str:
@@ -410,7 +436,7 @@ def signaldesk(name, root, db, now):
             why, unlocks, a["created_at"],
             {"kind": "signaldesk", "analysis_id": a["id"], "analysis_kind": a["kind"], "target_id": a["target_id"]},
             evidence=_readable({"source_text": text or "Source text unavailable", "recorded_inputs": inputs}),
-            facts=facts, root=root))
+            facts=facts, root=root, phone=_phone_variant(a["kind"], output, target, text)))
     for item in pipeline.needs_action(db, now):
         out.append(_reminder(name, f"pipeline:{item['kind']}:{item['job_id']}:{item.get('followup_id', '')}",
                     f"{item['title']} at {item['employer']}: {item['why']}. Open Pipeline on your laptop.",
@@ -503,17 +529,22 @@ def today(db: DB, now: datetime | None = None):
     day = now.date().isoformat()
     saved = db.one("SELECT * FROM project_days WHERE day=?", (day,))
     tasks, reminders = [], []
-    for t in db.all("SELECT t.*,r.verdict,r.note,r.created_at answered_at FROM project_tasks t LEFT JOIN project_responses r ON r.task_id=t.id WHERE t.day=? ORDER BY t.rowid", (day,)):
-        public = {**json.loads(t["payload_json"]), "id": t["id"], "skipped_at": t["skipped_at"],
-                  "response": {"verdict": t["verdict"], "note": t["note"], "at": t["answered_at"], "input_origin": "human"} if t["verdict"] else None}
+    for t in db.all("SELECT t.*,r.verdict,r.note,r.created_at answered_at,r.via FROM project_tasks t LEFT JOIN project_responses r ON r.task_id=t.id WHERE t.day=? ORDER BY t.rowid", (day,)):
+        public = {**{k: v for k, v in json.loads(t["payload_json"]).items() if k != "phone"}, "id": t["id"], "skipped_at": t["skipped_at"],
+                  "response": {"verdict": t["verdict"], "note": t["note"], "at": t["answered_at"], "input_origin": "human", "via": t["via"]} if t["verdict"] else None}
         (reminders if t["kind"] == "laptop_reminder" else tasks).append(public)
     start = datetime.combine((now - timedelta(days=now.weekday())).date(), datetime.min.time(), tzinfo=now.tzinfo).astimezone(timezone.utc).isoformat()
     progress = {r["project"]: r["n"] for r in db.all("SELECT project,COUNT(*) n FROM project_responses WHERE julianday(created_at)>=julianday(?) GROUP BY project", (start,))}
     return {"day": day, "prepared": bool(saved), "projects": json.loads(saved["projects_json"]) if saved else [],
-            "tasks": tasks, "reminders": reminders, "done_this_week": progress}
+            "tasks": tasks, "reminders": reminders, "done_this_week": progress,
+            "cloud": db.get_setting("coach_sync_status"), "phone_conflicts": (db.get_setting("coach_conflicts") or [])[-5:]}
 
 
-def respond(db: DB, task_id: str, verdict: str, note: str):
+def respond(db: DB, task_id: str, verdict: str, note: str, *, response_id: str | None = None, via: str = "desktop",
+            at: str | None = None):
+    """Save a human verdict. Phone answers arrive with the phone's own response id and time."""
+    if via not in ("desktop", "phone"):
+        raise ValueError("Unknown answer channel")
     if len(note) > 4000:
         raise ValueError("Keep your note to 4,000 characters or fewer")
     with db.immediate() as con:
@@ -527,9 +558,10 @@ def respond(db: DB, task_id: str, verdict: str, note: str):
             if old["verdict"] == verdict and old["note"] == note.strip():
                 return {"id": old["id"], "saved": True, "duplicate": True}
             raise ValueError("This item already has a human verdict; it was not overwritten")
-        response_id = str(uuid.uuid4())
-        con.execute("INSERT INTO project_responses VALUES (?,?,?,?,?,?,?,?)",
-                    (response_id, task_id, task["project"], task["source_key"], verdict, note.strip(), now_iso(), "human"))
+        response_id = str(uuid.UUID(response_id)) if response_id else str(uuid.uuid4())
+        con.execute("INSERT INTO project_responses(id,task_id,project,source_key,verdict,note,created_at,input_origin,via) "
+                    "VALUES (?,?,?,?,?,?,?,?,?)",
+                    (response_id, task_id, task["project"], task["source_key"], verdict, note.strip(), _utc(at) if at else now_iso(), "human", via))
     return {"id": response_id, "saved": True, "duplicate": False}
 
 
@@ -602,13 +634,13 @@ def export_responses(cfg: Config, db: DB):
                     z.writestr(sheet.name, "".join(chunks))
                 if (source / "key.json").exists():
                     z.writestr("key.json", (source / "key.json").read_bytes())
-                z.writestr("signaldesk-human-input.json", _dump([{k: r[k] for k in ("id", "source_key", "verdict", "note", "created_at", "input_origin")} for r in rows]))
+                z.writestr("signaldesk-human-input.json", _dump([{k: r[k] for k in ("id", "source_key", "verdict", "note", "created_at", "input_origin", "via")} for r in rows]))
             if exported_ids != set(marks):
                 raise ExportBlocked("NextWord review sheet no longer contains a reviewed answer")
         else:
             path = directory / f"{stem}.json"
             path.write_text(_dump({"format": "signaldesk-project-responses-v1", "responses": [
-                {**{k: r[k] for k in ("id", "source_key", "verdict", "note", "created_at", "input_origin")},
+                {**{k: r[k] for k in ("id", "source_key", "verdict", "note", "created_at", "input_origin", "via")},
                  **json.loads(r["export_json"])} for r in rows]}), encoding="utf-8")
         paths.append(path.name)
     final = directory.with_suffix("")

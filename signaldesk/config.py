@@ -98,6 +98,13 @@ class ExperimentalConfig:
 
 
 @dataclass
+class CoachConfig:
+    """Project Coach. auto_prepare: while SignalDesk runs, prepare each day's batch (reading the
+    configured clones only) and sync it, so the phone has tasks when the laptop is later off."""
+    auto_prepare: bool = False
+
+
+@dataclass
 class ProjectConfig:
     name: str
     path: str
@@ -114,6 +121,7 @@ class Config:
     lan: LanConfig = field(default_factory=LanConfig)
     auth: AuthConfig = field(default_factory=AuthConfig)
     experimental: ExperimentalConfig = field(default_factory=ExperimentalConfig)
+    coach: CoachConfig = field(default_factory=CoachConfig)
     demo: bool = False                     # set only by --demo: synthetic data, no fetching, no model calls
     project: list[ProjectConfig] = field(default_factory=list)
 
@@ -158,7 +166,7 @@ def load_config(home: Path | None = None) -> Config:
     path = home / "config.toml"
     if path.exists():
         data = tomllib.loads(path.read_text(encoding="utf-8-sig"))   # Notepad and PowerShell 5 save UTF-8 with a BOM
-        for section in ("server", "model", "fetch", "limits", "lan", "auth", "experimental"):
+        for section in ("server", "model", "fetch", "limits", "lan", "auth", "experimental", "coach"):
             _apply(getattr(cfg, section), data.get(section, {}))
         seen = set()
         for item in data.get("project", []):

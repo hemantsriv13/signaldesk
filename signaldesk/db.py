@@ -448,7 +448,13 @@ def _migrate_projects(conn: sqlite3.Connection) -> None:
     """)
 
 
-MIGRATIONS = [_migrate_v3, _migrate_v4, _migrate_pipeline, _migrate_followups, _migrate_projects]
+def _migrate_project_sync(conn: sqlite3.Connection) -> None:
+    # Where a human answer was given: the laptop page or the phone (via the cloud copy).
+    if "via" not in {r[1] for r in conn.execute("PRAGMA table_info(project_responses)")}:
+        conn.execute("ALTER TABLE project_responses ADD COLUMN via TEXT NOT NULL DEFAULT 'desktop'")
+
+
+MIGRATIONS = [_migrate_v3, _migrate_v4, _migrate_pipeline, _migrate_followups, _migrate_projects, _migrate_project_sync]
 
 
 class DB:

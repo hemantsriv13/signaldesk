@@ -10,6 +10,7 @@ import threading
 import uuid
 from urllib.parse import urlsplit
 import httpx
+from . import coach_sync
 from .db import now_iso
 
 
@@ -59,6 +60,7 @@ class Delivery:
 
     def describe(self):
         return {**self.config(), 'last_run': self.db.get_setting('sync_status'),
+                'projects': self.db.get_setting('coach_sync_status'),
                 'recent': [self.db.get_setting(f'delivery:{r["id"]}') for r in self.db.all('SELECT id FROM digests ORDER BY id DESC LIMIT 5')]}
 
     def tick(self):
@@ -74,6 +76,29 @@ class Delivery:
         except Exception:
             # Provider errors can include credentials/echoed payloads: never log response bodies.
             self.db.set_setting('sync_status', {'at': now_iso(), 'state': 'failed', 'message': 'Cloud sync failed. Check credentials, schema and network; the next check retries.'})
+        finally:
+            self.lock.release()
+        self.sync_projects()
+
+    def sync_projects(self):
+        """Project Coach tasks and phone answers. Separate status: a missing table (SQL not yet run)
+        must not mark briefing sync as failed."""
+        if not self.engine.cfg.project or not self.config()['cloud_configured'] or not self.lock.acquire(blocking=False):
+            return
+        try:
+            e = self.env
+            if self.client is None:
+                self.client = httpx.Client(timeout=25, follow_redirects=False)
+            result = coach_sync.sync(self.engine.cfg, self.db, self.client, e['SIGNALDESK_SUPABASE_URL'].rstrip('/'),
+                                     auth_headers(e['SIGNALDESK_SUPABASE_SERVICE_KEY']), e['SIGNALDESK_OWNER_ID'])
+            self.db.set_setting('coach_sync_status', {'at': now_iso(), 'state': 'checked', **result})
+        except httpx.HTTPStatusError as exc:
+            hint = ' Run cloud/project_coach.sql in Supabase first.' if exc.response.status_code == 404 else ''
+            self.db.set_setting('coach_sync_status', {'at': now_iso(), 'state': 'failed',
+                                'message': f'Project sync failed (HTTP {exc.response.status_code}).{hint} The next check retries.'})
+        except Exception:
+            self.db.set_setting('coach_sync_status', {'at': now_iso(), 'state': 'failed',
+                                'message': 'Project sync failed. Check network and schema; the next check retries.'})
         finally:
             self.lock.release()
 

@@ -10,7 +10,7 @@ interface Task {
   pass_criteria: string; what_this_is: string; why_it_matters: string; unlocks_next: string
   verdicts: string[]; skipped_at: string | null
   why_sources?: { kind: "readme" | "count"; text: string; source?: string; file?: string; line?: number }[]
-  response: { verdict: string; note: string; at: string; input_origin: "human" } | null
+  response: { verdict: string; note: string; at: string; input_origin: "human"; via?: "desktop" | "phone" } | null
 }
 interface Project {
   name: string; kind: string; available: boolean; open_reviews: number; branch: string | null
@@ -19,6 +19,8 @@ interface Project {
 interface Batch {
   day: string; prepared: boolean; tasks: Task[]; reminders: Task[]; projects: Project[]
   done_this_week: Record<string, number>
+  cloud: { at: string; state: "checked" | "failed"; message?: string; pushed?: number } | null
+  phone_conflicts: { at: string; project: string | null; phone_verdict: string; kept: string | null }[]
 }
 
 export default function Projects() {
@@ -82,7 +84,9 @@ export default function Projects() {
         <div><Button className="min-h-11" variant="outline" disabled={busy} onClick={exportAnswers}>Export saved answers</Button></div>
         {message && <p role="status" className="max-w-3xl break-words text-sm">{message}</p>}
         {exportError && <p role="alert" className="max-w-3xl break-words text-sm text-(--destructive-text)">{exportError}</p>}
-        {data.tasks.filter(t => t.response).map(t => <p key={t.id} className="text-sm">{t.project}: {t.response!.verdict} · Human input · {day(t.response!.at)}</p>)}
+        {data.tasks.filter(t => t.response).map(t => <p key={t.id} className="text-sm">{t.project}: {t.response!.verdict} · {t.response!.via === "phone" ? "Your answer from the phone" : "Your answer here"} · {day(t.response!.at)}</p>)}
+        {data.phone_conflicts.map(c => <p key={c.at + c.project} className="text-sm text-(--warning-text)">{c.project}: the phone said {c.phone_verdict}, but this item already had {c.kept ?? "an answer"}. The earlier answer was kept.</p>)}
+        {data.cloud && <p className="text-xs text-muted-foreground">{data.cloud.state === "failed" ? data.cloud.message : `Phone copy synced ${day(data.cloud.at)}.`}</p>}
       </Section>
     </>}
   </div>
