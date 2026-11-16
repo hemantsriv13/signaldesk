@@ -12,7 +12,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -71,6 +71,12 @@ class Generate(BaseModel):
 
 class RunBody(BaseModel):
     agent: str
+
+class PhoneAnswerBody(BaseModel):
+    id: str
+    verdict: str
+    note: str = ""
+    answered_at: str | None = None
 
 class ProjectResponseBody(BaseModel):
     verdict: str
@@ -217,6 +223,18 @@ def create_app(engine: Engine, scheduler: Scheduler | None = None, delivery_env:
             resp.headers.setdefault("Cache-Control", "no-store")
         return resp
 
+    PHONE_ORIGINS = {"https://localhost", "capacitor://localhost"}   # the Android/iOS app shells, nothing else
+
+    def phone_cors(request: Request, resp):
+        origin = request.headers.get("origin") or ""
+        if origin in PHONE_ORIGINS:
+            resp.headers["Access-Control-Allow-Origin"] = origin
+            resp.headers["Access-Control-Allow-Headers"] = "authorization, content-type"
+            resp.headers["Access-Control-Allow-Methods"] = "GET, POST"
+            resp.headers["Access-Control-Max-Age"] = "600"
+            resp.headers["Vary"] = "Origin"
+        return resp
+
     def deny(code: int, detail: str, lan: bool):
         return headers(JSONResponse({"detail": detail}, code), lan)
 
@@ -238,6 +256,17 @@ def create_app(engine: Engine, scheduler: Scheduler | None = None, delivery_env:
                              "in config.toml and restart SignalDesk.", lan)
         authz = request.headers.get("authorization") or ""
         request.state.session = request.state.panel = None
+        if path.startswith("/api/phone/"):
+            # The Android app (origin https://localhost) over Tailscale/LAN HTTPS only, with a phone token.
+            if not lan:
+                return deny(403, "Phone access works only on the signed-in HTTPS address.", lan)
+            if request.method == "OPTIONS":
+                return phone_cors(request, Response(status_code=204))
+            tok = auth.phone_token(db, authz[7:].strip()) if authz.lower().startswith("bearer ") else None
+            if not tok or not auth.phone_route(path):
+                return phone_cors(request, deny(401, "Pair this phone again from SignalDesk settings.", lan))
+            request.state.panel = tok
+            return phone_cors(request, headers(await call_next(request), lan))
         if authz.lower().startswith("bearer "):
             # Side-panel credential: not ambient (no cookie), so CSRF does not apply; scope does.
             if not path.startswith("/api/"):
@@ -554,6 +583,35 @@ def create_app(engine: Engine, scheduler: Scheduler | None = None, delivery_env:
             return projects.skip(db, task_id)
         except ValueError as e:
             raise HTTPException(400, str(e)) from None
+
+    # ------------------------------------------------------------ live phone access (phone token, HTTPS only)
+    @app.get("/api/phone/projects")
+    def phone_projects():
+        return projects.phone_today(db)
+
+    @app.post("/api/phone/projects/{task_id}/answer")
+    def phone_answer(task_id: str, body: PhoneAnswerBody):
+        try:
+            return projects.respond(db, task_id, body.verdict, body.note, response_id=body.id, via="phone", at=body.answered_at)
+        except ValueError as e:
+            code = 409 if "already has a human verdict" in str(e) else 400
+            raise HTTPException(code, str(e)) from None
+
+    @app.get("/api/projects/phone-tokens")
+    def phone_tokens():
+        return {"tokens": [t for t in auth.list_panel_tokens(db) if t["label"].startswith("Phone:") and not t["revoked_at"]]}
+
+    @app.delete("/api/projects/phone-tokens/{tid}")
+    def revoke_phone(tid: int):
+        if not db.scalar("SELECT 1 FROM panel_tokens WHERE id=? AND label LIKE 'Phone:%'", (tid,)):
+            raise HTTPException(404, "No such phone code")
+        auth.revoke_panel_token(db, tid)
+        return phone_tokens()
+
+    @app.post("/api/projects/phone-token")
+    def new_phone_token(body: PanelTokenBody):
+        tid, token = auth.create_phone_token(db, body.label, cfg.auth.panel_token_days)
+        return {"id": tid, "token": token, "note": "Shown once. Type it into the phone app; SignalDesk keeps only its hash."}
 
     @app.post("/api/projects/writeback")
     def project_writeback():

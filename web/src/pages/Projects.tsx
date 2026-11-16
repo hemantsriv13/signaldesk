@@ -38,6 +38,17 @@ export default function Projects() {
     catch (e) { setFailure(e instanceof Error ? e.message : String(e)) }
     finally { setBusy(false) }
   }
+  const [phoneCode, setPhoneCode] = useState("")
+  const tokens = useApi<{ tokens: { id: number; label: string; hint: string; last_used_at: string | null }[] }>("/api/projects/phone-tokens")
+  async function revoke(id: number) {
+    try { tokens.setData(await api.send("/api/projects/phone-tokens/" + id, "DELETE")) } catch (e) { setExportError(e instanceof Error ? e.message : String(e)) }
+  }
+  async function pairPhone() {
+    setBusy(true); setExportError(""); setMessage("")
+    try { setPhoneCode((await api.send<{ token: string }>("/api/projects/phone-token", "POST", { label: "Android app" })).token); await tokens.reload() }
+    catch (e) { setExportError(e instanceof Error ? e.message : String(e)) }
+    finally { setBusy(false) }
+  }
   async function writeBack() {
     setBusy(true); setExportError(""); setMessage("")
     try { await api.send("/api/projects/writeback", "POST", {}); await reload() }
@@ -93,6 +104,12 @@ export default function Projects() {
           {e.commit && <span className="text-muted-foreground">Branch {e.branch} · commit {e.commit} · {e.files.join(", ")} · {e.pushed ? "pushed, ready for you to merge" : "on this laptop only"}</span>}
         </li>)}</ul> : <p className="text-sm text-muted-foreground">Nothing written today. Answers go to a phone-review branch only for repos you allow in config.toml.</p>}
         <div><Button className="min-h-11" variant="outline" disabled={busy} onClick={writeBack}>Write answers to projects</Button></div>
+      </Section>
+      <Section title="Phone over Tailscale">
+        <p className="max-w-3xl text-sm text-muted-foreground">Optional. The phone reaches this laptop's signed-in HTTPS address directly when it is awake, and uses the cloud copy otherwise.</p>
+        <div><Button className="min-h-11" variant="outline" disabled={busy} onClick={pairPhone}>Pair a phone</Button></div>
+        {phoneCode && <p role="status" className="max-w-3xl break-all text-sm">Phone code, shown once: <code className="font-mono">{phoneCode}</code>. Type it into the phone app under Laptop over Tailscale.</p>}
+        {tokens.data?.tokens.map(t => <p key={t.id} className="flex flex-wrap items-center gap-2 text-sm">{t.label} ending {t.hint} · {t.last_used_at ? `last used ${day(t.last_used_at)}` : "not used yet"}<Button className="min-h-11" variant="outline" onClick={() => void revoke(t.id)}>Revoke</Button></p>)}
       </Section>
       <Section title="Your answers">
         <p className="max-w-3xl text-sm text-muted-foreground">Exports go to the data folder. Importing them into another project remains a separate laptop action.</p>

@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
 import { discard, enqueue, flush, keys, readNotices, readQueue, skip, skippedToday, type KeyValue, type QueuedAnswer } from "./answer-queue"
 import * as reminders from "./reminders"
+import { liveAnswer, liveToday, validLive, type Live } from "./live"
 
 interface Card {
   project: string; type: string; title: string; text: string; pass_criteria: string; what_this_is: string
@@ -32,19 +33,29 @@ export function PhoneProjects({ client, session }: { client: SupabaseClient; ses
   const [notices, setNotices] = useState<string[]>(() => readNotices(storage, uid))
   const [active, setActive] = useState<string | null>(null)
   const [skipTick, setSkipTick] = useState(0)
+  const [live, setLive] = useState<Live | null>(() => { try { return JSON.parse(storage.get(keys(uid).live) ?? "null") } catch { return null } })
+  const [source, setSource] = useState<"laptop" | "cloud" | "phone">("phone")
 
   const send = useCallback(async (a: QueuedAnswer) => {
     if (typeof navigator !== "undefined" && !navigator.onLine) return { ok: false as const, offline: true }
+    if (validLive(live)) {
+      const r = await liveAnswer(live, a)
+      if (r.ok || !r.offline) return r                      // reached the laptop: its answer stands
+    }
     const r = await client.from(RESPONSES).insert({ id: a.id, task_id: a.task_id, verdict: a.verdict, note: a.note, answered_at: a.answered_at }).abortSignal(AbortSignal.timeout(10000))
     if (!r.error) return { ok: true as const }
     const offline = r.status === 0 || /abort|timeout|fetch/i.test(r.error.message ?? "") || (typeof navigator !== "undefined" && !navigator.onLine)
     return { ok: false as const, offline, code: r.error.code, message: offline ? undefined : `The cloud refused this answer (${r.error.code || r.status}).` }
-  }, [client])
+  }, [client, live])
   const lookup = useCallback(async (taskId: string) => {
+    if (validLive(live)) {
+      const b = await liveToday(live)
+      if (b && b !== "unpaired") return b.answered[taskId] ?? null
+    }
     const r = await client.from(RESPONSES).select("id").eq("task_id", taskId).limit(1).abortSignal(AbortSignal.timeout(8000))
     if (r.error) return r.status === 0 || /abort|timeout|fetch/i.test(r.error.message ?? "") ? "offline" as const : null
     return (r.data?.[0] as { id: string } | undefined)?.id ?? null
-  }, [client])
+  }, [client, live])
 
   const sendWaiting = useCallback(async () => {
     const r = await flush(storage, uid, send, lookup)
@@ -66,6 +77,15 @@ export function PhoneProjects({ client, session }: { client: SupabaseClient; ses
     try {
       if (typeof navigator !== "undefined" && !navigator.onLine) throw new Error("offline")   // airplane mode: no waiting
       await sendWaiting()
+      if (validLive(live)) {
+        const b = await liveToday(live)
+        if (b === "unpaired") setError("The laptop no longer accepts this phone. Pair it again in Laptop over Tailscale.")
+        if (b && b !== "unpaired") {
+          const next = { tasks: b.tasks as CloudTask[], answered: Object.keys(b.answered), at: new Date().toISOString() }
+          setData(next); setFromDevice(false); setSource("laptop"); storage.set(keys(uid).tasks, JSON.stringify(next))
+          return
+        }
+      }
       const t = await client.from(TASKS).select("id,day,project,kind,status,payload,synced_at").eq("owner_id", uid).order("day", { ascending: false }).limit(12).abortSignal(AbortSignal.timeout(8000))
       if (t.error) throw t.error
       const rows = (t.data ?? []) as CloudTask[]
@@ -75,12 +95,12 @@ export function PhoneProjects({ client, session }: { client: SupabaseClient; ses
       const r = ids.length ? await client.from(RESPONSES).select("task_id").in("task_id", ids).abortSignal(AbortSignal.timeout(8000)) : { data: [], error: null }
       if (r.error) throw r.error
       const next = { tasks, answered: (r.data ?? []).map((x: { task_id: string }) => x.task_id), at: new Date().toISOString() }
-      setData(next); setFromDevice(false); storage.set(keys(uid).tasks, JSON.stringify(next))
+      setData(next); setFromDevice(false); setSource("cloud"); storage.set(keys(uid).tasks, JSON.stringify(next))
     } catch {
-      setFromDevice(true)
+      setFromDevice(true); setSource("phone")
       setError("No connection. Showing what was saved on this phone; answers wait here and send later.")
     } finally { setBusy(false) }
-  }, [client, uid, sendWaiting])
+  }, [client, uid, sendWaiting, live])
 
   useEffect(() => {
     void load()
@@ -111,7 +131,7 @@ export function PhoneProjects({ client, session }: { client: SupabaseClient; ses
       <h2 id="phone-projects" className="font-heading text-2xl">Projects</h2>
       <Button variant="outline" disabled={busy} onClick={() => void load()}>{busy ? "Checking…" : "Refresh"}</Button>
     </div>
-    <p className="text-xs text-muted-foreground">{day ? `${dayLabel(day)} · ${open.length} left` : "No batch yet"}{data ? ` · ${fromDevice ? "saved on this phone" : "from the cloud"}` : ""}</p>
+    <p className="text-xs text-muted-foreground">{day ? `${dayLabel(day)} · ${open.length} left` : "No batch yet"}{data ? ` · ${fromDevice ? "saved on this phone" : source === "laptop" ? "live from your laptop" : "from the cloud"}` : ""}</p>
     {error && <p role="status" className="text-sm">{error}</p>}
     {queue.length > 0 && <div className="mobile-paper grid gap-2" role="status">
       <p className="text-sm font-medium">{queue.length === 1 ? "1 answer" : `${queue.length} answers`} waiting to send</p>
@@ -136,6 +156,7 @@ export function PhoneProjects({ client, session }: { client: SupabaseClient; ses
       <h3 className="text-sm font-semibold">On your laptop</h3>
       {laptop.map((t) => <p key={t.id} className="text-sm text-muted-foreground">{t.project}: {t.payload.text}</p>)}
     </div>}
+    <LiveSettings live={live} onSave={(l) => { storage.set(keys(uid).live, l ? JSON.stringify(l) : null); setLive(l) }} />
     <ReminderSettings />
   </section>
 }
@@ -169,6 +190,25 @@ function PhoneCard({ task, onSave, onSkip }: { task: CloudTask; onSave: (verdict
       <div className="flex flex-wrap gap-2"><Button type="submit" disabled={busy}>Save answer</Button><Button type="button" variant="outline" disabled={busy} onClick={onSkip}>Skip today</Button></div>
     </form>
   </article>
+}
+
+function LiveSettings({ live, onSave }: { live: Live | null; onSave: (l: Live | null) => void }) {
+  const [url, setUrl] = useState(live?.url ?? "")
+  const [token, setToken] = useState("")
+  const [message, setMessage] = useState("")
+  return <details className="mobile-paper"><summary className="min-h-11 cursor-pointer py-3 text-sm font-medium">Laptop over Tailscale: {live ? "paired" : "off"}</summary>
+    <form className="mt-3 grid gap-3" onSubmit={(e) => {
+      e.preventDefault()
+      const next = { url: url.trim().replace(/\/+$/, "") + "/", token: token.trim() || live?.token || "" }
+      if (!validLive(next)) { setMessage("Use the https:// address and the phone code from your laptop."); return }
+      onSave(next); setToken(""); setMessage("Saved. The app uses the laptop when it answers, the cloud otherwise.")
+    }}>
+      <label className="grid gap-1 text-sm">Laptop address<input type="url" inputMode="url" className="min-h-11 rounded-lg border border-border bg-card px-3" placeholder="https://laptop.tailnet.ts.net:8443" value={url} onChange={(e) => setUrl(e.target.value)} /></label>
+      <label className="grid gap-1 text-sm">Phone code{live ? " (leave empty to keep)" : ""}<input type="password" autoComplete="off" className="min-h-11 rounded-lg border border-border bg-card px-3" value={token} onChange={(e) => setToken(e.target.value)} /></label>
+      <div className="flex flex-wrap gap-2"><Button type="submit">Save</Button>{live && <Button type="button" variant="outline" onClick={() => { onSave(null); setUrl(""); setMessage("Forgotten on this phone.") }}>Forget</Button>}</div>
+      {message && <p role="status" className="text-sm">{message}</p>}
+    </form>
+  </details>
 }
 
 function ReminderSettings() {

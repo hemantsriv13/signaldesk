@@ -42,29 +42,35 @@ def _covered(host: str, names: set[str]) -> bool:
 def check(cfg: Config) -> tuple[list[str], list[str]]:
     """(errors, warnings). Any error means LAN mode must not start."""
     lan, errors, warnings = cfg.lan, [], []
-    try:
-        ip = ipaddress.ip_address(lan.bind)
-        if ip.is_loopback or ip.is_unspecified or ip.is_link_local or not ip.is_private or ip.is_multicast:
-            errors.append(f"[lan] bind = \"{lan.bind}\" is not a private home-network address. Use this PC's Wi-Fi address "
-                          "(run: Get-NetIPAddress -AddressFamily IPv4 -InterfaceAlias Wi-Fi). 0.0.0.0 and public addresses are refused.")
-    except ValueError:
-        errors.append("[lan] bind is missing. Set it to this PC's Wi-Fi address, e.g. bind = \"192.168.1.10\".")
+    if lan.network not in ("home", "tailscale"):
+        return ['[lan] network must be "home" or "tailscale".'], []
+    hosts = [str(h).strip() for h in lan.hostnames if str(h).strip()]
+    if lan.network == "tailscale":
+        errors += _tailscale_address(lan.bind, hosts)
+    else:
+        try:
+            ip = ipaddress.ip_address(lan.bind)
+            if ip.is_loopback or ip.is_unspecified or ip.is_link_local or not ip.is_private or ip.is_multicast:
+                errors.append(f"[lan] bind = \"{lan.bind}\" is not a private home-network address. Use this PC's Wi-Fi address "
+                              "(run: Get-NetIPAddress -AddressFamily IPv4 -InterfaceAlias Wi-Fi). 0.0.0.0 and public addresses are refused.")
+        except ValueError:
+            errors.append("[lan] bind is missing. Set it to this PC's Wi-Fi address, e.g. bind = \"192.168.1.10\".")
+        if not hosts:
+            errors.append("[lan] hostnames is empty. List exactly what your phone will type, e.g. hostnames = [\"192.168.1.10\"].")
     if lan.port in (cfg.server.port, 8000) or not 1024 <= lan.port <= 65535:
         errors.append(f"[lan] port = {lan.port} clashes with the loopback app or Colibri; use 8443.")
-    hosts = [str(h).strip() for h in lan.hostnames if str(h).strip()]
-    if not hosts:
-        errors.append("[lan] hostnames is empty. List exactly what your phone will type, e.g. hostnames = [\"192.168.1.10\"].")
+    renew = "tailscale cert (see docs\\LAN_AND_PANEL.md)" if lan.network == "tailscale" else "scripts\\lan-setup.ps1"
     cert, key = Path(lan.cert_file or "_missing_"), Path(lan.key_file or "_missing_")
     for label, p in (("cert_file", cert), ("key_file", key)):
         if not p.is_file():
-            errors.append(f"[lan] {label} not found: {p}. Create it with scripts\\lan-setup.ps1 (see docs\\LAN_AND_PANEL.md).")
+            errors.append(f"[lan] {label} not found: {p}. Create it with {renew}.")
         elif REPO in p.resolve().parents:
             errors.append(f"[lan] {label} is inside the code repository ({p}). Keep certificates and keys in the data directory.")
     if cert.is_file() and key.is_file():
         try:
             ssl.create_default_context(ssl.Purpose.CLIENT_AUTH).load_cert_chain(str(cert), str(key))
         except (ssl.SSLError, OSError) as e:
-            errors.append(f"[lan] The certificate and key do not load together ({e}). Re-create them with scripts\\lan-setup.ps1.")
+            errors.append(f"[lan] The certificate and key do not load together ({e}). Re-create them with {renew}.")
         try:
             names, expires = cert_names(str(cert))
             missing = [h for h in hosts if not _covered(h, names)]
@@ -72,14 +78,34 @@ def check(cfg: Config) -> tuple[list[str], list[str]]:
                 errors.append(f"[lan] The certificate does not cover {', '.join(missing)} (it covers {', '.join(sorted(names)) or 'nothing'}). "
                               "Re-create it for exactly the names in [lan] hostnames.")
             if expires and expires < datetime.now(timezone.utc):
-                errors.append(f"[lan] The certificate expired on {expires:%Y-%m-%d}. Renew it with scripts\\lan-setup.ps1.")
+                errors.append(f"[lan] The certificate expired on {expires:%Y-%m-%d}. Renew it with {renew}.")
             elif expires and (expires - datetime.now(timezone.utc)).days < 30:
-                warnings.append(f"The LAN certificate expires on {expires:%Y-%m-%d}. Renew it soon with scripts\\lan-setup.ps1.")
+                warnings.append(f"The LAN certificate expires on {expires:%Y-%m-%d}. Renew it soon with {renew}.")
         except (ssl.SSLError, OSError, ValueError, KeyError) as e:
             errors.append(f"[lan] Could not read the certificate ({e}).")
     if not cfg.auth_path.exists():
         errors.append("No sign-in password is set. Run:  .venv\\Scripts\\python -m signaldesk auth set-password")
     return errors, warnings
+
+
+TAILNET_V4 = ipaddress.ip_network("100.64.0.0/10")
+TAILNET_V6 = ipaddress.ip_network("fd7a:115c:a1e0::/48")
+
+
+def _tailscale_address(bind: str, hosts: list[str]) -> list[str]:
+    """Tailscale: the same signed-in HTTPS listener, bound only to this PC's Tailscale address, so only
+    devices in your tailnet can reach it. The certificate comes from `tailscale cert` for the PC's
+    *.ts.net name, which phones trust without installing anything."""
+    errors = []
+    try:
+        ip = ipaddress.ip_address(bind)
+        if ip not in TAILNET_V4 and ip not in TAILNET_V6:
+            errors.append(f"[lan] bind = \"{bind}\" is not a Tailscale address. Use the address shown by: tailscale ip -4")
+    except ValueError:
+        errors.append("[lan] bind is missing. Set it to this PC's Tailscale address (tailscale ip -4).")
+    if not hosts or any(not h.lower().endswith(".ts.net") for h in hosts):
+        errors.append("[lan] hostnames must be this PC's Tailscale name only, e.g. [\"laptop.tailnet-name.ts.net\"].")
+    return errors
 
 
 def allowed_hosts(cfg: Config) -> set[str]:

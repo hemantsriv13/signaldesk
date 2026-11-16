@@ -185,3 +185,33 @@ def list_panel_tokens(db: DB) -> list[dict]:
 # settings, exports, outreach, contacts, runs, sources and token management.
 def panel_route(path: str) -> bool:
     return path.startswith("/api/panel/") and not path.startswith("/api/panel/tokens")
+
+
+# ---------------------------------------------------------------- phone tokens (live access over Tailscale)
+# Same table and hashing as side-panel tokens; the prefix is part of the hashed token, so a phone
+# token can never be used as a panel token or the other way round.
+PHONE_PREFIX = "sdm_"
+
+
+def create_phone_token(db: DB, label: str, days: int) -> tuple[int, str]:
+    token = PHONE_PREFIX + secrets.token_urlsafe(32)
+    now = _now()
+    tid = db.insert("panel_tokens", {"label": ("Phone: " + (label or "Android app"))[:80], "token_hash": _h(token), "hint": token[-4:],
+                                     "created_at": _iso(now), "expires_at": _iso(now + timedelta(days=days))})
+    return tid, token
+
+
+def phone_token(db: DB, token: str | None) -> dict | None:
+    if not token or not token.startswith(PHONE_PREFIX):
+        return None
+    row = db.one("SELECT * FROM panel_tokens WHERE token_hash = ?", (_h(token),))
+    if not row or row["revoked_at"] or datetime.fromisoformat(row["expires_at"]) < _now():
+        return None
+    if not row["last_used_at"] or _now() - datetime.fromisoformat(row["last_used_at"]) > timedelta(minutes=5):
+        db.run("UPDATE panel_tokens SET last_used_at = ? WHERE id = ?", (now_iso(), row["id"]))
+    return row
+
+
+def phone_route(path: str) -> bool:
+    """The only routes a phone token reaches: today's project cards and answering them."""
+    return path.startswith("/api/phone/")

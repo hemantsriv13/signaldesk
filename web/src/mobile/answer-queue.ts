@@ -19,6 +19,7 @@ export const keys = (uid: string) => ({
   tasks: `signaldesk-projects:${uid}`,
   skips: `signaldesk-project-skips:${uid}`,
   notices: `signaldesk-answer-notices:${uid}`,
+  live: `signaldesk-live:${uid}`,                    // laptop address and phone token
 })
 
 function readJson<T>(s: KeyValue, key: string, fallback: T): T {

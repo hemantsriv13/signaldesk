@@ -70,6 +70,7 @@ class LanConfig:
     """LAN mode: one authenticated HTTPS entry point on this PC's home-network address. Off by default.
     The app on 127.0.0.1 and Colibri stay on loopback."""
     enabled: bool = False
+    network: str = "home"                  # "home" (Wi-Fi address) or "tailscale" (this PC's 100.x Tailscale address)
     bind: str = ""                         # this PC's private address, e.g. 192.168.1.10; never 0.0.0.0
     port: int = 8443
     hostnames: list = field(default_factory=list)   # names/addresses devices type, all covered by the certificate

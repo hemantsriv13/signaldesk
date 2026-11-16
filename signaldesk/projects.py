@@ -547,6 +547,20 @@ def today(db: DB, now: datetime | None = None):
             "written_today": [e for e in (db.get_setting("writeback_log") or []) if e["at"][:10] == datetime.now(timezone.utc).date().isoformat()][-10:]}
 
 
+def phone_today(db: DB, now: datetime | None = None) -> dict:
+    """Today's batch as the phone sees it from the cloud copy: phone-safe cards and their status."""
+    now = now or datetime.now().astimezone()
+    day = now.date().isoformat()
+    tasks, answered = [], {}
+    for t in db.all("SELECT t.*, r.id rid FROM project_tasks t LEFT JOIN project_responses r ON r.task_id=t.id WHERE t.day=? ORDER BY t.rowid", (day,)):
+        tasks.append({"id": t["id"], "day": t["day"], "project": t["project"], "kind": t["kind"],
+                      "status": "answered" if t["rid"] else "skipped" if t["skipped_at"] else "open",
+                      "payload": phone_card(json.loads(t["payload_json"])), "synced_at": now_iso()})
+        if t["rid"]:
+            answered[t["id"]] = t["rid"]
+    return {"tasks": tasks, "answered": answered, "source": "laptop"}
+
+
 def respond(db: DB, task_id: str, verdict: str, note: str, *, response_id: str | None = None, via: str = "desktop",
             at: str | None = None):
     """Save a human verdict. Phone answers arrive with the phone's own response id and time."""
