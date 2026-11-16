@@ -88,8 +88,15 @@ commands that would verify the rest: [docs/STATUS.md](docs/STATUS.md).
 | V4 | Pipeline, Today's actions, stage form, Mark sent, follow-ups | Built, tested | 295 mocked tests; pipeline ran on demo data in the browser; Mark sent and follow-ups not used on real data |
 | V4 | Skill gaps and Lead with | Built, tested | Mocked tests; grouping ran on the copy (25 roles); not checked in browser |
 | V4 | Demo mode (`--demo`) | Verified offline | `tests/test_demo.py`: no network or model requests |
+| PC | Project Coach: daily batch, sourced reasons, desktop Projects page, exports | Verified on a copy | Ran on the data copy against the real clones 2026-11-16; one answer of each type in the browser (label type on a scratch copy, real pushback has none open); exports opened; 390/1440/1728, light and dark |
+| PC | Grader verdicts hidden from label tasks | Verified | Tests on API and stored tasks, plus a scan of the live API response and rendered page |
+| PC | Cloud copy of tasks and phone answers | Built, mocked | Mocked tests only; `cloud/project_coach.sql` not yet run on the live project, so row-level security is unchecked |
+| PC | Phone Projects tab, offline queue, sign-out clearing | Built, scripted | 14 scripted checks in headless Chrome at 390 px against a local Supabase stand-in; APK built; not yet on a real phone |
+| PC | Daily phone reminders | Built | APK builds with the plugin; not tested on a phone |
+| PC | Write answers into project clones (phone-review) | Built, blocked | Git tests on throwaway repos; dry run with the real repo checks: both repos' own tests reject filled answers in their current sheets, so it stops before committing |
+| PC | Live phone access over Tailscale | Built, mocked | Mocked tests (tailnet-only bind, token scope, CORS, revocation); no tunnel or phone run yet |
 
-Tests: 295 mocked tests pass, and the deterministic evaluation passes all 19 cases. CI runs both, and
+Tests: 343 mocked tests and 13 phone-app tests pass, and the deterministic evaluation passes all 19 cases. CI runs both, and
 the web checks, on every push.
 
 ## Quick start (Windows)
@@ -121,9 +128,10 @@ scripts\test.cmd                                 :: mocked tests + deterministic
 
 Project Coach's laptop-only Projects page is documented in [PROJECT_COACH.md](docs/PROJECT_COACH.md).
 Configure `[[project]]` entries from `config.example.toml`, then prepare a daily batch on that page.
-The CLI requires an explicit data home: `python -m signaldesk.projects collect --home <copied-data-home>`
-and `python -m signaldesk.projects export --home <copied-data-home>`. Exports never modify sibling clones.
-Cloud tasks, the phone Projects tab and notifications are not implemented yet.
+The CLI requires an explicit data home: `python -m signaldesk.projects collect|export|writeback --home <home>`.
+Writing answers into a clone needs your approval per repo in `[writeback]`, works on a `phone-review`
+branch in a separate worktree, changes only human columns in allow-listed review files, and never
+touches main. The phone can answer through the cloud copy, or live over Tailscale (LAN_AND_PANEL.md §8).
 
 - **This computer only, by default.** The app binds to 127.0.0.1, refuses other Host names, and
   accepts changes only from its own pages. Optional LAN mode (experimental, off) adds one signed-in

@@ -59,3 +59,24 @@ main, merge, scheduled task, firewall/LAN/tunnel changes. Nothing private in Git
   Both stops were correct (nothing committed). Owner decision needed before any real write.
 - No real clone was written; copy holds 2 TEST answers, fixture home 1 — never write those back.
 - Part 4 (LAN/Tailscale) and Part 5 not started. Pushes, SQL, migrations all wait on the owner.
+
+## Update 2026-11-16 (evening) — Part 4 built, Part 5 partly done
+- Part 4: [lan] network = "tailscale" (tailnet-only bind, *.ts.net name, tailscale cert), phone codes
+  scoped to /api/phone/*, CORS for the app shell only, live-then-cloud phone mode, pairing and
+  revoke on Projects. 7 mocked tests + 5 node tests. LAN mode itself is still NOT run (needs the
+  owner's go-ahead: it opens a listener). Owner steps: docs/LAN_AND_PANEL.md §8.
+- APK rebuilt 19:39 with live mode; scanned: no secret keys.
+- Spacing measured: 390 (card) and 1440 (new sections) — no critical/serious findings.
+- Backup of the live folder: D:\LocalAI\signaldesk-backup-before-project-coach-20261116 (SQLite online
+  backup; row counts match; integrity ok). Live DB is schema 2; a scratch copy migrates to 7 with all
+  rows and job statuses kept. The live folder itself is NOT migrated — waiting for the owner.
+- Docs updated: README status table (PC rows), EVALUATION.md §5, PROJECT_COACH.md, LAN_AND_PANEL.md §8.
+- Pushes: see the final report for which branches were pushed.
+
+## Decisions waiting on the owner
+1. Run cloud/project_coach.sql in Supabase; then verify_cloud.py --projects with two accounts.
+2. Write-back: both repos' tests reject filled answers (pushback hash pins; NextWord blank sheets).
+   Change those tests/manifest, write to a separate review file instead, or keep exports only?
+3. pushback has untracked HANDOFF.md and reports/runs/ — write-back refuses until handled.
+4. [coach] auto_prepare on? 5. Delete the TEST answers on the copy and fixture homes?
+6. Go-ahead to run LAN/Tailscale mode after your setup steps. 7. Go-ahead to migrate the live folder.

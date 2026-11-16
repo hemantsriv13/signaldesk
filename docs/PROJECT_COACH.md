@@ -1,132 +1,66 @@
 # Project Coach
 
-## Scope and checkpoint
+Bounded ordinary code, like the other agents: no model, no free text from a model, no repository
+code run except each repo's own tests. Rules choose up to three reviews a day; templates explain them.
 
-Step 1 implements laptop collection, deterministic task selection, local human
-responses, exports to the data folder, and a desktop Projects page. Stop for
-owner review before cloud sync. Steps 2–4 are not implemented. Verification and
-any remaining access limitations are recorded in HANDOFF_PROJECTS.md.
+## 1. Daily batch (laptop)
 
-The coach is bounded ordinary code, like the four existing agents. It does not
-write code, run models in sibling projects, execute repository instructions, or
-change those clones. A model is unnecessary for the first version. If optional
-polish is added later, templates remain authoritative and validation failure or
-an unavailable model must return the template without blocking selection.
+- `[[project]]` entries (`name`, `path`, `kind` = pushback | nextword | signaldesk, optional
+  `check_python`). Missing or unreadable clones become laptop reminders; nothing fails.
+- Adapters read: pushback `labels/*.csv` rows with an empty `human_label` (allow-listed columns
+  only; evidence is the row's own `## <probe>` section of the data sheet); NextWord human-review
+  sheets with a blank `Verdict:` mapped by `key.json` (turns and engine facts only; never automatic
+  checks, `ai_review.json` or model names); SignalDesk job-fit and case-study analyses.
+- Selection: one task per project first, then fill to three; result-blocking first, then oldest
+  (timestamps compared as UTC instants). Frozen per laptop day; answered items never return.
+- **Why it matters** cites facts read at collection time: a README line that must still say the quoted
+  text (re-checked by `check_why`), and counts from your data (open reviews, shortlisted roles and
+  how many mention the project's skill). Text without a verifiable fact is rejected and the item
+  becomes a laptop reminder. Pushback with no open rows gives a counted reminder; no model is run.
+- Answers are immutable human input (`via` desktop or phone); a different second answer is refused.
 
-## Local contract
+## 2. Exports (laptop)
 
-Configuration uses repeated `[[project]]` entries with `name`, `path`, and `kind`.
-Kinds identify the pushback, nextword and signaldesk adapters. Resolve configured
-paths explicitly; report missing clones as unavailable without failing the run.
-Read Git branch, last commit time, and dirty state without changing the index,
-checking out branches, running hooks, or printing repository content to logs.
+`python -m signaldesk.projects export --home <home>` or *Export saved answers*: pushback CSV
+(sheet columns + `human_at`, `input_origin`), NextWord ZIP (sheets, `key.json`, audit JSON),
+SignalDesk JSON v1, under `<home>\project-exports\<time>-<id>`. A failed check names itself.
 
-Each source adapter yields stable item identities, source age, result-blocking
-priority, review text, pass criteria, evidence facts, and export provenance.
-Store task snapshots and responses in SignalDesk SQLite. Responses record UTC
-time and `human` provenance. Enforce allowed verdicts per task type and reject
-answers to read-only reminders. Use a unique response identity for later sync.
+## 3. Phone (cloud copy)
 
-Blind pushback cards use an allowlist of source fields. Grader labels, scores,
-reasons and verdicts must never enter the task payload, including nested metadata
-and explanatory text. Test both stored snapshots and serialized API output.
+`cloud/project_coach.sql` adds `signaldesk_project_tasks` (laptop writes, owner reads) and
+`signaldesk_project_responses` (owner inserts only; verdict must be allowed by the task; no update,
+delete or import columns). The laptop pushes phone-safe cards: SignalDesk cards never carry
+profile-fact notes, recorded inputs or full articles (postings capped at 4,000 characters). Phone
+answers are imported through the same rules; conflicts keep the earlier answer and are shown.
+`[coach] auto_prepare = true` prepares each day's batch while SignalDesk runs (off by default).
 
-Select a persisted daily batch of at most three answerable tasks. Prefer one
-per available project, then fill unused slots from remaining candidates; within
-each project put result-blocking work first, then oldest, then stable identity.
-Answered source identities never return, even after a restart. Refresh must not
-create a second daily allowance. Keep up to three read-only laptop reminders
-separate from that allowance; a missing pushback sheet becomes a reminder, never
-a model run. Skip defers an item without fabricating a human verdict.
+The Android app's Projects tab queues answers on the phone with a phone-made id, sends them when
+online, recognises a lost reply instead of duplicating, and clears cards, queue, skips, live pairing
+and reminders on sign-out (warning first if answers are unsent). Reminders are Android local
+notifications at times you set, off by default, generic text, no push server.
 
-Every task has two plain sentences under “What this is”, a concrete sourced fact
-under “Why it matters”, and an explicit next result it unlocks. Never invent role
-counts or README claims. Counts may come from the copied database; project-result
-facts must come from verified project documentation. Keep learning relevance
-separate from unsupported claims that a task will secure employment.
+## 4. Live phone access (Tailscale)
 
-Export commands write one project file below the selected data home's
-`project-exports/<timestamp>-<id>` directory. Completed exports are published by
-renaming a `.pending` directory; a failed export leaves its incomplete directory
-for inspection. Export never invokes a consumer or writes back into a clone.
+See [LAN_AND_PANEL.md §8](LAN_AND_PANEL.md). The signed-in HTTPS listener bound to the tailnet
+address; phone codes reach only `/api/phone/*`. The app uses the laptop when it answers within four
+seconds and the cloud copy otherwise. No phone route uses the model queue, so phone requests never
+wait behind batch analysis; any future phone model request must be queued with a lower priority
+number than batch work (the queue already takes the lowest number first).
 
-- Pushback: CSV with the existing label-sheet columns, plus `human_at` and
-  `input_origin`. Only allowlisted columns are exported; grader fields are absent.
-- NextWord: one ZIP per project, containing the existing Markdown sheet names,
-  key.json, and a human-input audit JSON with timestamps and original notes.
-  The ZIP retains multiple set filenames because `compare_review.py --sheets`
-  expects them. Extract into a separate data-folder directory for that reader;
-  do not extract into the clone. Multiline notes become one line in Markdown;
-  the audit JSON retains the original. Changed sources, mappings or conflicting
-  external human notes/verdicts block export. Existing verdicts are never silently
-  overwritten. `compare_review.py` also needs its existing ai_review.json for
-  AI comparison; that file is not generated or altered by SignalDesk.
-- SignalDesk: versioned JSON (`signaldesk-project-responses-v1`) containing
-  analysis IDs, verdicts, notes, UTC response times and human provenance.
+## 5. Writing answers into the clones
 
-NextWord's existing blank `Verdict:` markers and key.json map the human-review
-backlog to saved results. The adapter reads bigram `cases`, tutor `runs`, and MLP
-`results`, including recorded engine facts or calculation lines. A result without
-a mapped sheet becomes a laptop setup reminder, not an invented review item.
+`python -m signaldesk.projects writeback --home <home>`, *Write answers to projects*, or
+`[writeback] auto = true` (every 30 minutes). Per repo, only when listed in `[writeback] write`;
+pushed only when also in `[writeback] push`. Work happens in a git worktree under
+`<home>\project-worktrees\<repo>` on branch `phone-review` (your open clone is not switched or
+edited). Allow-list: pushback `labels/*.csv` (human_label, human_note); NextWord
+`evals/local_ai/human_review/*.md` (Verdict, Note). SignalDesk answers are never committed.
+It stops on uncommitted work in the clone, a non-fast-forward `phone-review`, format drift, any
+change outside the allow-list, or a failing repo check (pushback: tests and `labels score`;
+NextWord: unittest and `compare_review.py`). Commits use your git identity and say they came from
+SignalDesk review. Main is never committed or pushed.
 
-Daily batches use the laptop's local calendar date. Collection is explicit from
-Projects, Agent runs, or `python -m signaldesk.projects collect --home <copy>`.
-The normal sweep has not been changed. Once prepared, the day's batch is frozen,
-including skipped cards; answered source IDs never return on later days. No
-projects configured does not freeze an empty batch. After changing a prepared
-configuration, the next daily batch reads it. Project Git metadata is a snapshot
-at collection time, not a live status claim.
-
-Responses are immutable in this version. A repeated identical save is harmless;
-a different second verdict is rejected. Skip means “skip today”, with no human
-verdict or export row. Weekly counts start on Monday in the laptop's timezone.
-The SQLite migration is additive and leaves prior jobs and briefings intact.
-
-## Running Step 1
-
-Add the three entries shown in config.example.toml to a copied home's config.toml.
-Keep delivery credentials out of the copy. Then, with a functional Python env:
-
-```powershell
-.venv\Scripts\python -m pytest -q
-.venv\Scripts\python -m signaldesk.projects collect --home <copied-data-home>
-.venv\Scripts\python -m signaldesk.projects export --home <copied-data-home>
-.venv\Scripts\python -m signaldesk --home <copied-data-home> --no-start-model
-```
-
-Open Projects in the desktop shell, prepare the batch, read the evidence, and
-save a verdict or skip today. Collection and export contain no network calls.
-The desktop page uses the existing origin, login and CSRF protections. No
-new hosting, service, queue worker, model request, or phone dependency was added.
-
-## Deferred designs
-
-### Tailscale tunnel
-
-Keep the current loopback laptop API and Supabase reader. A future tunnel needs
-an explicit owner decision, authenticated HTTPS, restricted devices and origins,
-and tests that unauthenticated users cannot read private data. Do not configure
-Tailscale, firewall rules or network listeners as part of Project Coach.
-
-### Live model questions from the phone
-
-A future request would enter the existing persistent queue with bounded input,
-an explicit user action, cancellation and a visible laptop-offline state. It
-must not expose the Colibri port or let text execute commands. Evaluate reliable
-answer validation before offering it; neither local model is currently trusted
-for free text. Today's cards always remain usable with templates alone.
-
-### Writing responses into sibling clones
-
-Keep exports as reviewable files in SignalDesk's data folder. A future explicit
-import action should show destination paths, source IDs and changed fields,
-validate the consumer schema, detect conflicting human answers, and make a
-recoverable backup. Ask before touching pushback or nextword. Never overwrite
-an existing human verdict silently or run model evaluation during import.
-
-### Commits and pushes in sibling repositories
-
-No automatic Git mutation. After a separately authorized import, show the owner
-the diff and exact proposed commit message. Obtain authorization before commits
-or pushes there, and again before any GitHub push unless already authorized for
-that concrete operation. Never include SignalDesk's private data in a commit.
+**Found in the dry run on scratch copies (2026-11-16):** both repos' own tests reject filled answers
+in their current committed sheets. Pushback pins the label CSV hashes in
+`reports/run-provenance.json`; NextWord requires the committed sheets to stay blank. So with the
+repos as they are, write-back always stops before committing. This needs your decision (see HANDOFF_PROJECTS.md).

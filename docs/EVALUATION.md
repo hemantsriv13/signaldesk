@@ -92,6 +92,21 @@ settings; the live folder was not used. Counts only; no person, profile or posti
   instructions a potential match; the 4B did not this time. Automatic checks do not say which is right.
   Report: `<data dir>\evals\compare-qwen3-4b-instruct-2507-q4km-vs-qwen3.5-9b-q4km.md` (copy).
 
+## 5. Project Coach (2026-11-16, branch project-coach)
+
+What was run, and what it showed. No model was called for any of it.
+
+| Check | Result |
+|---|---|
+| Collection on the data copy against the real pushback, nextword and signaldesk clones | 3 review tasks (1 NextWord, 2 SignalDesk) and 1 pushback laptop reminder: all 60 pushback rows already have a human label |
+| "Why it matters" on real data | Every task cited a README line that still exists plus counts (e.g. open answers in the sheet, shortlisted roles mentioning the skill); generic text is rejected by `check_why` (tests) |
+| Answers in the browser | Job-fit (desktop), tutor answer (desktop), label on a scratch copy of pushback with 3 rows blanked; skip, refresh, missing-verdict error and export all behaved as specified. All are marked TEST ANSWER and are not your reviews |
+| Grader blindness | API and rendered page scanned: no grader verdict, reason or score. Tests also cover NextWord automatic checks, `ai_review.json` and model names |
+| Phone tab, scripted (local Supabase stand-in, 390 px, light and dark) | 14/14: online answer, offline queue, reopen offline, reconnect, no duplicate sends, sign-out warning and clearing |
+| Write-back dry run (scratch copies, real repo checks) | Stopped correctly in both repos: pushback's provenance test pins label CSV hashes; NextWord's tests require blank committed sheets. Nothing committed |
+| Real data migration (scratch copy of the live database backup) | Schema 2 to 7; all rows and job statuses kept; integrity ok |
+| Not run | Live Supabase RLS for the new tables, a real phone, reminders on a phone, the Tailscale tunnel, any write to a real clone |
+
 ## Human review
 
 Not done. To complete it, read these (all in `D:\LocalAI\signaldesk-v4-copy\evals` unless noted):

@@ -173,3 +173,53 @@ through); tests.
 CA in your Windows trust store; the `[lan]` block in config.toml; the firewall rule; DHCP reservations
 on your router; the CA certificate on your phone; loading the extension; any disk encryption or backup
 changes.
+
+## 8. Phone over Tailscale (Project Coach live mode)
+
+**What it is.** The same signed-in HTTPS listener as LAN mode, bound to this PC's Tailscale address
+(100.x) instead of its Wi-Fi address. Only devices signed in to your tailnet can reach it. The phone
+app asks it for today's project cards and sends answers to it when the laptop is awake, and uses the
+Supabase copy otherwise. Colibri (port 8000) and the loopback app (8780) are never exposed.
+
+**Why not `tailscale serve` or Funnel.** `serve` would put a second proxy in front of SignalDesk and
+forward to the loopback app, which has no sign-in; Funnel would publish it to the internet. Binding
+the existing HTTPS listener to the tailnet address keeps the sign-in, CSRF, host and origin checks
+exactly as they are, and needs no new proxy.
+
+**Phone access.** The app does not use your password. On the Projects page, *Pair a phone* shows a
+phone code once (only its hash is kept). It works only on the HTTPS address, only for
+`/api/phone/*` (today's phone-safe cards and answering them), never on plain loopback, and CORS
+allows only the app's own origin (`https://localhost`). Revoke it on the same page.
+
+**Your steps (I wait for you to do these before testing):**
+1. Install Tailscale on the laptop (tailscale.com/download/windows) and on the phone (Play Store).
+   Sign in to the same account on both.
+2. In the Tailscale admin console → DNS: turn on MagicDNS and **HTTPS Certificates**.
+3. On the laptop, in PowerShell: `tailscale ip -4` (the 100.x address) and `tailscale status`
+   (the machine name). Your name is `<machine>.<tailnet>.ts.net`.
+4. Make the certificate in the data folder (not the repo):
+   `tailscale cert --cert-file D:\LocalAI\signaldesk\tls\ts.crt --key-file D:\LocalAI\signaldesk\tls\ts.key <machine>.<tailnet>.ts.net`
+   It lasts 90 days; run the same command to renew.
+5. Set a sign-in password if you have none: `.venv\Scripts\python -m signaldesk auth set-password`.
+6. In `config.toml`:
+   ```toml
+   [lan]
+   enabled = true
+   network = "tailscale"
+   bind = "100.x.y.z"
+   port = 8443
+   hostnames = ["<machine>.<tailnet>.ts.net"]
+   cert_file = 'D:\LocalAI\signaldesk\tls\ts.crt'
+   key_file = 'D:\LocalAI\signaldesk\tls\ts.key'
+   ```
+7. Windows may ask to allow Python on private networks the first time it listens; Tailscale's
+   adapter is treated as its own network. Allow it for **Private** only.
+8. Sleep: Settings → System → Power → *When plugged in, put my device to sleep after* → Never (or
+   accept that the phone falls back to the cloud copy while the laptop sleeps). Closing the lid also
+   sleeps unless Control Panel → Power Options → *Choose what closing the lid does* says otherwise.
+9. Start SignalDesk normally; it prints `https://<machine>.<tailnet>.ts.net:8443/`. On the phone,
+   Projects → *Laptop over Tailscale*: that address and the phone code from *Pair a phone*.
+
+**Checked so far (mocked):** tailnet-only bind and `*.ts.net` names, refusal on loopback, CORS
+limited to the app shell, token scope and revocation, phone answers stored as human phone input and
+immutable. **Not yet run:** a real tunnel, certificate, phone or sleep behaviour.
