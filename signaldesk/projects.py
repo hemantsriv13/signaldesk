@@ -86,12 +86,111 @@ def git_facts(path: Path) -> dict:
                 "git_error": "Could not read Git metadata; check path and Git access."}
 
 
-def _task(project, key, kind, title, text, criteria, what, why, unlocks, age, export=None, evidence="", blocking=True):
+# ---------------------------------------------------------------- sourced facts for "Why it matters"
+# Every answerable task's reason must quote a README line that exists now, or a count computed now
+# from the data home or the clone. Templates only arrange these facts; they never supply one.
+README_FACTS = {
+    "pushback": [("README.md", r"the held-out Opus false pass below is still present", "problem"),
+                 ("README.md", r"### Agreement with human labels", "result")],
+    "nextword": [("README.md", r"Human review has not been done yet", "problem"),
+                 ("README.md", r"went from \d+ to \d+ correct of \d+ \(AI review\)", "result")],
+    "signaldesk": [("README.md", r"Your review of the job-fit judgements \| Not done", "problem"),
+                   ("README.md", r"Each point is labelled source fact, vendor claim, inference or missing", "case")],
+}
+ROLE_KEYWORDS = {"pushback": ("evaluation", r"\bevaluat\w*|\bevals?\b"),
+                 "nextword": ("LLM", r"\bLLMs?\b|\blanguage models?\b"),
+                 "signaldesk": ("agent", r"\bagents?\b|\bagentic\b")}
+SHORTLISTED = ("Interested", "Investigate")
+
+
+class ExportBlocked(ValueError):
+    """An export check failed. Messages are fixed text from this module: no paths or file content."""
+
+
+class UnsourcedExplanation(ValueError):
+    """A "Why it matters" text that does not carry a verifiable fact."""
+
+
+def readme_facts(kind: str, root: Path) -> dict:
+    """{role: fact} for each configured README pattern that matches a line in the clone today."""
+    out = {}
+    for rel, pattern, role in README_FACTS.get(kind, []):
+        try:
+            lines = _inside(root, rel).read_text(encoding="utf-8-sig").splitlines()
+        except (OSError, ValueError):
+            continue
+        for n, line in enumerate(lines, 1):
+            m = re.search(pattern, line)
+            if m:
+                quote = m[0].strip()
+                out[role] = {"kind": "readme", "file": rel, "line": n, "quote": quote,
+                             "text": f'{rel} line {n}: "{quote.lstrip("# ")}"'}
+                break
+    return out
+
+
+def count_fact(value: int, text: str, source: str) -> dict:
+    return {"kind": "count", "value": value, "text": text, "source": source}
+
+
+def role_fact(db: DB, kind: str) -> dict | None:
+    """Shortlisted roles in the data home, and how many postings mention this project's skill."""
+    rows = db.all(f"SELECT description_text FROM jobs WHERE status IN ({','.join('?' * len(SHORTLISTED))})", SHORTLISTED)
+    if not rows:
+        return None
+    word, pattern = ROLE_KEYWORDS[kind]
+    k = sum(bool(re.search(pattern, r["description_text"] or "", re.I)) for r in rows)
+    return count_fact(k, f'{k} of your {len(rows)} shortlisted roles mention "{word}" in the posting',
+                      "jobs table, shortlisted statuses")
+
+
+def check_why(text: str, facts: list[dict], root: Path | None = None) -> None:
+    """Reject an explanation unless it cites at least one fact, every cited fact appears verbatim,
+    counts carry their number, and README quotes are still on the cited line."""
+    if not text or not facts:
+        raise UnsourcedExplanation("No sourced fact supports this explanation")
+    for f in facts:
+        if f.get("text") not in text:
+            raise UnsourcedExplanation("A cited fact is missing from the explanation")
+        if f["kind"] == "count":
+            if not isinstance(f.get("value"), int) or not re.search(rf"(?<!\d){f['value']}(?!\d)", f["text"]):
+                raise UnsourcedExplanation("A count fact does not state its number")
+        elif f["kind"] == "readme":
+            if root is None:
+                raise UnsourcedExplanation("A README fact cannot be checked without its clone")
+            try:
+                lines = _inside(root, f["file"]).read_text(encoding="utf-8-sig").splitlines()
+            except (OSError, ValueError):
+                raise UnsourcedExplanation("The cited README could not be read") from None
+            if not (0 < f["line"] <= len(lines) and f["quote"] in lines[f["line"] - 1]):
+                raise UnsourcedExplanation("The cited README line no longer says this")
+        else:
+            raise UnsourcedExplanation("Unknown fact kind")
+
+
+def _sentence(*parts) -> str:
+    return " ".join(p.rstrip(".") + "." for p in parts if p)
+
+
+def _task(project, key, kind, title, text, criteria, what, why, unlocks, age, export=None, evidence="", blocking=True,
+          facts=None, root=None):
+    if kind != "laptop_reminder":
+        check_why(why, facts or [], root)
     return {"project": project, "source_key": key, "type": kind, "title": title,
             "text": text, "pass_criteria": criteria, "what_this_is": what, "why_it_matters": why,
-            "unlocks_next": unlocks, "evidence": evidence, "source_at": age,
+            "why_sources": [{k: f[k] for k in ("kind", "text", "source", "file", "line") if k in f} for f in facts or []],
+            "unlocks_next": unlocks, "evidence": evidence, "source_at": _utc(age),
             "result_blocking": blocking, "explanation_by": "template", "verdicts": VERDICTS[kind],
             "_export": export or {}}
+
+
+def _utc(at: str) -> str:
+    """Normalise timestamps so "oldest first" compares instants, not strings with different offsets."""
+    try:
+        d = datetime.fromisoformat(at)
+    except (TypeError, ValueError):
+        return at
+    return (d if d.tzinfo else d.replace(tzinfo=timezone.utc)).astimezone(timezone.utc).isoformat()
 
 
 def _reminder(name, key, text, age, why):
@@ -110,30 +209,54 @@ def _csv_rows(path):
     return list(csv.DictReader(io.StringIO(text), delimiter=";" if first.count(";") > first.count(",") else ","))
 
 
-def pushback(name, root):
-    candidates, answered = {}, set()
+def pushback(name, root, db=None):
+    rows, answered, totals = [], set(), {}
     for sheet in sorted((root / "labels").glob("*.csv")):
-        for row in _csv_rows(sheet):
-            if not row.get("item_id"):
-                continue
+        sheet_rows = [r for r in _csv_rows(sheet) if r.get("item_id")]
+        totals[sheet.name] = len(sheet_rows)
+        for row in sheet_rows:
             key = f"reply:{row['item_id']}"
             if row.get("human_label", "").strip():
                 answered.add(key)
-                continue
-            if not row.get("model_reply") or not row.get("what_counts_as_pass"):
-                raise ValueError("Incomplete Pushback review row")
-            # Allowlist only. Extra grader fields must not enter snapshots OR exports.
-            clean = {c: row.get(c, "") for c in LABEL_COLUMNS}
-            evidence_path = sheet.with_name(sheet.stem + "_data.md")
-            evidence = evidence_path.read_text(encoding="utf-8-sig") if evidence_path.exists() else ""
-            candidates.setdefault(key, _task(name, key, "label_reply", "Judge a reply under pressure",
-                f"User message:\n{clean['user_message']}\n\nReply:\n{clean['model_reply']}",
-                clean["what_counts_as_pass"],
-                "This is a saved reply from a model evaluation. Judge it against the supplied data and pass rule.",
-                "Pushback's README reports a held-out false pass: the grader accepted a reply the owner rejected. Your label checks the grader and builds evaluation experience you can discuss in interviews.",
-                "A labelled row can enter the existing grader-agreement report.", _age(sheet),
-                {"kind": "pushback", "row": clean}, evidence=evidence or "Source data sheet missing; choose unclear if the supplied rule is insufficient."))
-    return [v for k, v in candidates.items() if k not in answered]
+            else:
+                rows.append((sheet, key, row))
+    open_keys = {k for _, k, _ in rows if k not in answered}
+    if not open_keys:
+        total = sum(totals.values())
+        fact = count_fact(total, f"All {total} rows in {', '.join(f'labels/{s}' for s in totals) or 'labels/'} already have a human_label",
+                          "pushback label sheets")
+        return [_reminder(name, "new-sheet",
+                          "No rows with an empty human_label. Generate a new label sheet from saved runs on your laptop. No model was run.",
+                          datetime.now(timezone.utc).isoformat(),
+                          _sentence(fact["text"], "There is nothing to label from the phone until a new sheet exists"))]
+    readme = readme_facts("pushback", root)
+    opened = count_fact(len(open_keys), f"{len(open_keys)} rows in pushback/labels have no human_label yet", "pushback label sheets")
+    role = role_fact(db, "pushback") if db else None
+    facts = [f for f in (readme.get("problem"), opened, role) if f]
+    why = _sentence(readme["problem"]["text"] if "problem" in readme else "",
+                    "Your label is an independent check on the grader", opened["text"], role["text"] if role else "")
+    result = readme.get("result")
+    unlocks = (f"A labelled row is counted in the result under {result['text']} when you rerun Pushback's agreement report on your laptop."
+               if result else "A labelled row is counted when you rerun Pushback's agreement report on your laptop.")
+    candidates = {}
+    for sheet, key, row in rows:
+        if key in answered or key in candidates:
+            continue
+        if not row.get("model_reply") or not row.get("what_counts_as_pass"):
+            raise ValueError("Incomplete Pushback review row")
+        # Allowlist only. Extra grader fields must not enter snapshots OR exports.
+        clean = {c: row.get(c, "") for c in LABEL_COLUMNS}
+        evidence_path = sheet.with_name(sheet.stem + "_data.md")
+        evidence = evidence_path.read_text(encoding="utf-8-sig") if evidence_path.exists() else ""
+        candidates[key] = _task(name, key, "label_reply", "Judge a reply under pressure",
+            f"User message:\n{clean['user_message']}\n\nReply:\n{clean['model_reply']}",
+            clean["what_counts_as_pass"],
+            "This is a saved reply from a model evaluation. Judge it against the supplied data and pass rule.",
+            why, unlocks, _age(sheet),
+            {"kind": "pushback", "row": clean, "sheet": sheet.name},
+            evidence=evidence or "Source data sheet missing; choose unclear if the supplied rule is insufficient.",
+            facts=facts, root=root)
+    return list(candidates.values())
 
 
 def _sheet_marks(text):
@@ -155,16 +278,26 @@ def _sheet_marks(text):
     return found
 
 
-def nextword(name, root):
+def nextword(name, root, db=None):
     base = root / "evals" / "local_ai"
     key_path = base / "human_review" / "key.json"
     if not key_path.exists():
         return []
     key = _json(key_path)["answers"]
     out, cache = [], {}
+    readme = readme_facts("nextword", root)
+    role = role_fact(db, "nextword") if db else None
     for sheet in sorted((base / "human_review").glob("*.md")):
         # The existing blank verdict marker is the project's awaiting-human-review state.
-        for aid, mark in _sheet_marks(sheet.read_text(encoding="utf-8-sig")).items():
+        marks = _sheet_marks(sheet.read_text(encoding="utf-8-sig"))
+        blank = sum(not m["verdict"] for m in marks.values())
+        opened = count_fact(blank, f"{blank} of {len(marks)} answers in {sheet.name} still have a blank verdict", f"nextword {sheet.name}")
+        facts = [f for f in (readme.get("problem"), opened, role) if f]
+        why = _sentence(readme["problem"]["text"] if "problem" in readme else "", opened["text"], role["text"] if role else "")
+        result = readme.get("result")
+        unlocks = (f"Your verdict sits beside the AI review behind {result['text']} when compare_review.py runs on your laptop."
+                   if result else "Your verdict sits beside the AI review when compare_review.py runs on your laptop.")
+        for aid, mark in marks.items():
             if mark["verdict"] or aid not in key:
                 continue
             meta = key[aid]
@@ -184,32 +317,39 @@ def nextword(name, root):
                            and r.get("repeat", 1) == meta.get("repeat", 1)), None)
             if record is None:
                 raise ValueError("Review sheet has no matching saved answer")
-            turns, facts = [], []
+            turns, facts_seen = [], []
             if record.get("facts") is not None:
-                facts.append(record["facts"])
+                facts_seen.append(record["facts"])
             for t in record.get("turns", []):
                 turns.append({k: t.get(k) for k in ("action", "question", "answer", "refused")})
-                if t.get("facts") is not None and t["facts"] not in facts:
-                    facts.append(t["facts"])
+                if t.get("facts") is not None and t["facts"] not in facts_seen:
+                    facts_seen.append(t["facts"])
                 if t.get("calculations"):
-                    facts.append({"engine_calculations": t["calculations"]})
-            if not facts or not turns:
+                    facts_seen.append({"engine_calculations": t["calculations"]})
+            if not facts_seen or not turns:
                 raise ValueError("Saved answer lacks engine facts or turns")
             source_key = f"answer:{meta['file']}:{parts[1]}:{meta.get('repeat', 1)}"
             out.append(_task(name, source_key, "review_answer", "Check a tutor answer",
                 "\n\n".join(f"Request: {t['question'] or t['action']}\nAnswer: {t['answer'] or '(No answer)'}" for t in turns),
                 "Correct: every turn agrees with the engine facts and answers the learner. Minor: a harmless flaw. Wrong: a false or unanswered claim; the worst turn decides.",
                 "This is a recorded tutor conversation. Check every turn against the engine facts below.",
-                f"NextWord's HUMAN_REVIEW.md requires a verdict for {sheet.stem} before reporting human-review results. Checking these explanations builds evidence-checking skills and gives you a concrete interview example.",
-                "The existing comparison can count your verdict beside the automatic checks.",
+                why, unlocks,
                 _age(result), {"kind": "nextword", "answer_id": aid, "sheet": sheet.name,
-                               "key": meta, "result_sha256": hashlib.sha256(result.read_bytes()).hexdigest()}, evidence=_readable(facts)))
+                               "key": meta, "result_sha256": hashlib.sha256(result.read_bytes()).hexdigest()},
+                evidence=_readable(facts_seen), facts=facts, root=root))
     return out
 
 
 def signaldesk(name, root, db, now):
     out = []
-    for a in db.all("SELECT * FROM analyses WHERE kind IN ('job_fit','case_study') ORDER BY created_at,id"):
+    readme = readme_facts("signaldesk", root)
+    role = role_fact(db, "signaldesk")
+    reviewed = {r["source_key"] for r in db.all("SELECT source_key FROM project_responses WHERE project=?", (name,))}
+    rows = [a for a in db.all("SELECT * FROM analyses WHERE kind IN ('job_fit','case_study') ORDER BY created_at,id")
+            if f"analysis:{a['id']}" not in reviewed]
+    open_count = {k: sum(a["kind"] == k for a in rows) for k in ("job_fit", "case_study")}
+    shortlisted = {r["id"] for r in db.all(f"SELECT id FROM jobs WHERE status IN ({','.join('?' * len(SHORTLISTED))})", SHORTLISTED)}
+    for a in rows:
         key = f"analysis:{a['id']}"
         inputs, output = json.loads(a["inputs_json"]), json.loads(a["output_json"])
         if inputs.get("human_verdict") or output.get("human_verdict"):
@@ -219,16 +359,25 @@ def signaldesk(name, root, db, now):
         if not target:
             continue
         text = target.get("description_text") if table == "jobs" else target.get("content_text")
-        why = (f"SignalDesk's README lists human job-fit review as not done. Checking analysis {a['id']} practises testing claims against evidence. It also helps you decide which project results to trust during your job search."
-               if a["kind"] == "job_fit" else
-               f"Case-study card {a['id']} separates source facts, vendor claims and inferences. Checking those labels practises evaluating evidence. A checked card gives you a more reliable deployment example to discuss in interviews.")
+        label = "job-fit analyses" if a["kind"] == "job_fit" else "case-study cards"
+        opened = count_fact(open_count[a["kind"]], f"{open_count[a['kind']]} {label} in your data have no human verdict", "analyses table")
+        if a["kind"] == "job_fit":
+            mine = (count_fact(len(shortlisted), f"This role is one of your {len(shortlisted)} shortlisted roles", "jobs table, shortlisted statuses")
+                    if a["target_id"] in shortlisted else None)
+            facts = [f for f in (readme.get("problem"), opened, mine or role) if f]
+            why = _sentence(readme["problem"]["text"] if "problem" in readme else "", opened["text"], (mine or role or {}).get("text", ""))
+            unlocks = "Enough verdicts let the README's job-fit review row move from Not done to a measured agreement rate."
+        else:
+            facts = [f for f in (readme.get("case"), opened, role) if f]
+            why = _sentence(readme["case"]["text"] if "case" in readme else "", opened["text"], role["text"] if role else "")
+            unlocks = "A checked card shows whether the source-fact and vendor-claim labels can be trusted in briefings."
         out.append(_task(name, key, "judge_analysis", f"Review: {target['title']}", _readable(output),
             "Agree if the claims and conclusion are supported by the source and supplied facts. Disagree if a material claim is unsupported. Unsure if evidence is missing.",
             "This is a saved analysis from SignalDesk. Compare its claims with the source and the facts recorded with it.",
-            why,
-            "A recorded human verdict separates checked claims from unchecked model output.", a["created_at"],
+            why, unlocks, a["created_at"],
             {"kind": "signaldesk", "analysis_id": a["id"], "analysis_kind": a["kind"], "target_id": a["target_id"]},
-            evidence=_readable({"source_text": text or "Source text unavailable", "recorded_inputs": inputs})))
+            evidence=_readable({"source_text": text or "Source text unavailable", "recorded_inputs": inputs}),
+            facts=facts, root=root))
     for item in pipeline.needs_action(db, now):
         out.append(_reminder(name, f"pipeline:{item['kind']}:{item['job_id']}:{item.get('followup_id', '')}",
                     f"{item['title']} at {item['employer']}: {item['why']}. Open Pipeline on your laptop.",
@@ -259,15 +408,21 @@ def collect(cfg: Config, db: DB, now: datetime):
             if p.kind == "signaldesk":
                 items = signaldesk(p.name, root, db, now)
             else:
-                items = (pushback if p.kind == "pushback" else nextword)(p.name, root)
+                items = (pushback if p.kind == "pushback" else nextword)(p.name, root, db)
             status["open_reviews"] = sum(i["type"] != "laptop_reminder" for i in items)
             candidates.extend(items)
-            if not status["open_reviews"] and p.kind in ("pushback", "nextword"):
-                message = ("No rows with an empty human_label. Generate a new label sheet on your laptop from saved runs; no model was run."
-                           if p.kind == "pushback" else "No mapped tutor answers awaiting human review. Check or generate the human-review sheets from saved results on your laptop.")
+            sheet_reminder = next((i for i in items if i["source_key"] == "new-sheet"), None)
+            if sheet_reminder:
+                status["notice"] = sheet_reminder["text"]
+            elif not status["open_reviews"] and p.kind == "nextword":
+                message = "No mapped tutor answers awaiting human review. Check or generate the human-review sheets from saved results on your laptop."
                 status["notice"] = message
                 candidates.append(_reminder(p.name, "new-sheet", message, now.isoformat(),
-                    f"{p.kind} has no reviewable rows in its current sheets; a sheet is needed before more human evaluation."))
+                    "No answer in evals/local_ai/human_review has a blank verdict mapped in key.json."))
+        except UnsourcedExplanation:
+            status["notice"] = "A review was found, but its reason could not be tied to a README line or count. Check the project README on your laptop."
+            candidates.append(_reminder(p.name, "unsourced", status["notice"], now.isoformat(),
+                              "Project Coach issues a task only when its reason cites a fact it can verify."))
         except (OSError, ValueError, KeyError, TypeError):
             # No exception text: it may contain source text or private paths.
             status["notice"] = "Review files could not be read safely. Check their format and access on your laptop."
@@ -363,7 +518,7 @@ def export_responses(cfg: Config, db: DB):
         root = Path(p.path).expanduser()
         root = (root if root.is_absolute() else cfg.home / root).resolve()
         if p.kind != "signaldesk" and base.is_relative_to(root):
-            raise ValueError("Export home must be outside configured project clones")
+            raise ExportBlocked("Export home must be outside configured project clones")
     directory = base / (datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S") + "-" + uuid.uuid4().hex[:8] + ".pending")
     directory.mkdir(parents=True)
     paths = []
@@ -390,10 +545,10 @@ def export_responses(cfg: Config, db: DB):
             for aid, r in marks.items():
                 metadata = json.loads(r["export_json"])
                 if current_key.get(aid) != metadata["key"]:
-                    raise ValueError("NextWord answer mapping changed since collection")
+                    raise ExportBlocked("NextWord answer mapping changed since collection")
                 result = _inside(source.parent, metadata["key"]["file"])
                 if hashlib.sha256(result.read_bytes()).hexdigest() != metadata["result_sha256"]:
-                    raise ValueError("NextWord saved answer changed since collection")
+                    raise ExportBlocked("NextWord saved answer changed since collection")
             exported_ids = set()
             with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as z:
                 for sheet in sorted(source.glob("*.md")):
@@ -406,9 +561,9 @@ def export_responses(cfg: Config, db: DB):
                             exported_ids.add(aid)
                             existing = _sheet_marks(chunks[i] + chunks[i+1])[aid]
                             if existing["verdict"] and existing["verdict"] != r["verdict"]:
-                                raise ValueError("NextWord sheet already contains a different verdict")
+                                raise ExportBlocked("NextWord sheet already contains a different verdict")
                             if existing["note"] and existing["note"] != " ".join(r["note"].splitlines()):
-                                raise ValueError("NextWord sheet already contains a different note")
+                                raise ExportBlocked("NextWord sheet already contains a different note")
                             chunks[i+1] = re.sub(r"^Verdict:[^\n]*", lambda _: "Verdict: " + r["verdict"], chunks[i+1], count=1, flags=re.M)
                             chunks[i+1] = re.sub(r"^Note:[^\n]*", lambda _: "Note: " + " ".join(r["note"].splitlines()), chunks[i+1], count=1, flags=re.M)
                     z.writestr(sheet.name, "".join(chunks))
@@ -416,7 +571,7 @@ def export_responses(cfg: Config, db: DB):
                     z.writestr("key.json", (source / "key.json").read_bytes())
                 z.writestr("signaldesk-human-input.json", _dump([{k: r[k] for k in ("id", "source_key", "verdict", "note", "created_at", "input_origin")} for r in rows]))
             if exported_ids != set(marks):
-                raise ValueError("NextWord review sheet no longer contains a reviewed answer")
+                raise ExportBlocked("NextWord review sheet no longer contains a reviewed answer")
         else:
             path = directory / f"{stem}.json"
             path.write_text(_dump({"format": "signaldesk-project-responses-v1", "responses": [
@@ -442,6 +597,9 @@ def main(argv=None):
         else:
             result = export_responses(cfg, db)
             print(f"Wrote {len(result['files'])} project export files under the selected data home. No clone changed.")
+    except ExportBlocked as e:
+        print(f"Export stopped: {e}. Nothing was published.")
+        return 2
     except (OSError, ValueError, KeyError, TypeError):
         print("Project Coach could not complete safely. Check data-home access and review formats; private content was not logged.")
         return 2

@@ -9,6 +9,7 @@ interface Task {
   id: string; project: string; type: string; title: string; text: string; evidence: string
   pass_criteria: string; what_this_is: string; why_it_matters: string; unlocks_next: string
   verdicts: string[]; skipped_at: string | null
+  why_sources?: { kind: "readme" | "count"; text: string; source?: string; file?: string; line?: number }[]
   response: { verdict: string; note: string; at: string; input_origin: "human" } | null
 }
 interface Project {
@@ -104,7 +105,8 @@ function Review({ task: t, changed }: { task: Task; changed: () => Promise<void>
     <div className="flex flex-col gap-2"><h4 className="font-semibold">Text to judge</h4><p className="whitespace-pre-wrap break-words text-sm leading-relaxed">{t.text}</p></div>
     <div className="flex flex-col gap-2"><h4 className="font-semibold">What counts as a pass</h4><p className="text-sm">{t.pass_criteria}</p></div>
     <details className="min-w-0"><summary className="min-h-11 cursor-pointer py-3 font-medium focus-visible:outline-2 focus-visible:outline-ring">Read the source and engine facts</summary><pre className="max-h-[32rem] overflow-y-auto whitespace-pre-wrap break-words rounded-md bg-muted p-4 font-sans text-sm">{t.evidence}</pre></details>
-    <div className="flex flex-col gap-2"><h4 className="font-semibold">Why it matters</h4><p className="text-sm">{t.why_it_matters}</p></div>
+    <div className="flex flex-col gap-2"><h4 className="font-semibold">Why it matters</h4><p className="text-sm">{t.why_it_matters}</p>
+      {!!t.why_sources?.length && <p className="text-xs text-muted-foreground">Sources: {t.why_sources.map(f => f.kind === "readme" ? `${t.project} ${f.file} line ${f.line}` : f.source).join(" · ")}</p>}</div>
     <div className="flex flex-col gap-2"><h4 className="font-semibold">What it unlocks next</h4><p className="text-sm">{t.unlocks_next}</p></div>
     <form className="flex flex-col gap-4" onSubmit={e => { e.preventDefault(); void save() }}>
       <fieldset disabled={busy} className="flex flex-wrap gap-2"><legend className="mb-2 text-sm font-medium">Your verdict</legend>{t.verdicts.map(v =>

@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from "react"
 import {
-  BookmarkSimpleIcon, BookOpenIcon, BriefcaseIcon, CheckCircleIcon, FlaskIcon, GearIcon, LinkSimpleIcon, MagnifyingGlassIcon, MoonIcon, QuestionIcon, RobotIcon, RssIcon, SunIcon,
+  BookmarkSimpleIcon, BookOpenIcon, BriefcaseIcon, CheckCircleIcon, FlaskIcon, GearIcon, LinkSimpleIcon, MagnifyingGlassIcon, MoonIcon, PencilSimpleIcon, QuestionIcon, RobotIcon, RssIcon, SunIcon,
 } from "@/components/icons"
 import { Button } from "@/components/ui/button"
 import { Sidebar, SidebarContent, SidebarFooter, SidebarGroup, SidebarHeader, SidebarItem } from "@/components/ui/sidebar"
@@ -27,7 +27,7 @@ const NAV: { page: string; label: string; icon: ReactNode }[] = [
   { page: "today", label: "Today", icon: <SunIcon /> },
   { page: "jobs", label: "Jobs", icon: <BriefcaseIcon /> },
   { page: "pipeline", label: "Pipeline", icon: <CheckCircleIcon /> },
-  { page: "projects", label: "Projects", icon: <FlaskIcon /> },
+  { page: "projects", label: "Projects", icon: <PencilSimpleIcon /> },
   { page: "gaps", label: "Skill gaps", icon: <FlaskIcon /> },
   { page: "hiring", label: "Hiring companies", icon: <MagnifyingGlassIcon /> },
   { page: "outreach", label: "Outreach", icon: <LinkSimpleIcon /> },

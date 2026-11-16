@@ -135,7 +135,8 @@ def test_fairness_and_fill_when_only_two_projects_have_work(tmp_path, monkeypatc
 def test_result_blocking_then_oldest_order(tmp_path, monkeypatch):
     cfg, db = setup(tmp_path, monkeypatch)
     def item(key, age, blocking):
-        return projects._task("pushback", key, "label_reply", key, "text", "criteria", "Sentence one. Sentence two.", "Source fact", "Report", age, blocking=blocking)
+        fact = projects.count_fact(4, "4 rows have no human_label yet", "fixture")
+        return projects._task("pushback", key, "label_reply", key, "text", "criteria", "Sentence one. Sentence two.", fact["text"] + ".", "Report", age, blocking=blocking, facts=[fact])
     monkeypatch.setattr(projects, "collect", lambda *a: ([], [item("recent-block", "2026-10-01", True), item("old-nonblock", "2025-01-01", False), item("old-block", "2026-01-01", True), item("new", "2026-11-01", False)]))
     result = projects.prepare(cfg, db, NOW)
     assert [t["source_key"] for t in result["tasks"]] == ["old-block", "recent-block", "old-nonblock"]
@@ -288,3 +289,87 @@ def test_denied_project_directory_is_reported_not_fatal(tmp_path, monkeypatch):
     statuses, tasks = projects.collect(cfg, db, NOW)
     assert not statuses[0]["available"]
     assert tasks[0]["type"] == "laptop_reminder"
+
+
+# ---------------------------------------------------------------- sourced "Why it matters"
+def readme(root, text):
+    (root / "README.md").write_text(text, encoding="utf-8")
+
+
+def test_generic_why_text_is_rejected():
+    fact = projects.count_fact(7, "7 rows have no human_label yet", "fixture")
+    for generic in ("Checking this builds evaluation skills you can discuss in interviews.",
+                    "This review helps your job search.", ""):
+        with pytest.raises(projects.UnsourcedExplanation):
+            projects.check_why(generic, [])
+        with pytest.raises(projects.UnsourcedExplanation):
+            projects.check_why(generic, [fact])          # the fact is not actually cited
+    with pytest.raises(projects.UnsourcedExplanation):  # a count fact must state its number
+        projects.check_why("Several rows are open.", [{"kind": "count", "value": 7, "text": "Several rows are open", "source": "x"}])
+    projects.check_why("7 rows have no human_label yet.", [fact])
+
+
+def test_readme_fact_must_still_be_on_the_cited_line(tmp_path):
+    readme(tmp_path, "# Pushback\nScores.\nthe held-out Opus false pass below is still present.\n")
+    fact = projects.readme_facts("pushback", tmp_path)["problem"]
+    assert fact["line"] == 3 and fact["text"] == 'README.md line 3: "the held-out Opus false pass below is still present"'
+    projects.check_why(fact["text"] + ".", [fact], tmp_path)
+    readme(tmp_path, "# Pushback\nThe false pass was fixed.\n")
+    with pytest.raises(projects.UnsourcedExplanation):
+        projects.check_why(fact["text"] + ".", [fact], tmp_path)
+
+
+def test_every_collected_task_cites_readme_and_pipeline_counts(tmp_path, monkeypatch):
+    cfg, db = setup(tmp_path, monkeypatch, ("pushback", "nextword", "signaldesk"))
+    readme(Path(cfg.project[0].path), "x\nthe held-out Opus false pass below is still present.\n### Agreement with human labels\n")
+    readme(Path(cfg.project[1].path), "**Human review has not been done yet.**\nwent from 9 to 13 correct of 16 (AI review)\n")
+    readme(Path(cfg.project[2].path), "| V1 | Your review of the job-fit judgements | Not done | Kit |\n")
+    jid = db.scalar("SELECT target_id FROM analyses WHERE id=?", (analysis(db),))
+    db.run("UPDATE jobs SET status='Interested', description_text='Build LLM evaluation agents.' WHERE id=?", (jid,))
+    result = projects.prepare(cfg, db, NOW)
+    by = {t["project"]: t for t in result["tasks"]}
+    assert set(by) == {"pushback", "nextword", "signaldesk"}
+    assert 'README.md line 2: "the held-out Opus false pass below is still present"' in by["pushback"]["why_it_matters"]
+    assert '1 of your 1 shortlisted roles mention "evaluation"' in by["pushback"]["why_it_matters"]
+    assert "Agreement with human labels" in by["pushback"]["unlocks_next"]
+    assert "3 of 3 answers in fixture.md still have a blank verdict" in by["nextword"]["why_it_matters"]
+    assert "went from 9 to 13 correct of 16" in by["nextword"]["unlocks_next"]
+    assert "This role is one of your 1 shortlisted roles" in by["signaldesk"]["why_it_matters"]
+    for t in result["tasks"]:
+        assert t["why_sources"] and all(s["text"] in t["why_it_matters"] for s in t["why_sources"])
+
+
+def test_pushback_without_open_rows_gives_a_counted_laptop_reminder(tmp_path, monkeypatch):
+    cfg, db = setup(tmp_path, monkeypatch)
+    label_sheet(Path(cfg.project[0].path), filled=True)
+    result = projects.prepare(cfg, db, NOW)
+    assert result["tasks"] == []
+    [r] = result["reminders"]
+    assert r["type"] == "laptop_reminder" and r["verdicts"] == []
+    assert "All 5 rows in labels/sheet.csv already have a human_label" in r["why_it_matters"]
+    assert "No model was run" in r["text"]
+    with pytest.raises(ValueError):
+        projects.respond(db, r["id"], "pass", "")
+
+
+def test_label_task_api_and_page_payload_never_show_grader(engine, fake_model, monkeypatch, tmp_path):
+    cfg, _ = setup(engine.cfg.home, monkeypatch)
+    root = Path(cfg.project[0].path)
+    (root / "reports").mkdir()
+    (root / "reports" / "grader-agreement.md").write_text("SECRET_REPORT_VERDICT", encoding="utf-8")
+    engine.cfg.project = cfg.project
+    c = TestClient(create_app(engine, delivery_env={}))
+    c.post("/api/projects/collect")
+    for body in (c.get("/api/projects").text, c.post("/api/projects/collect").text):
+        for forbidden in ("SECRET_GRADER", "SECRET_SCORE", "SECRET_REPORT", "grader_verdict", "grader_reason", '"score"'):
+            assert forbidden not in body
+
+
+def test_nextword_card_hides_automatic_checks_ai_review_and_model(tmp_path, monkeypatch):
+    cfg, db = setup(tmp_path, monkeypatch, ("nextword",))
+    review = Path(cfg.project[0].path) / "evals/local_ai/human_review"
+    (review / "ai_review.json").write_text('{"fixture/c0/A": "SECRET_AI_VERDICT"}', encoding="utf-8")
+    result = projects.prepare(cfg, db, NOW)
+    raw = json.dumps(result) + json.dumps(db.all("SELECT payload_json FROM project_tasks"))
+    for forbidden in ("SECRET_AI_VERDICT", "fixture-model", '"checks"', '"pass": false', "4b"):
+        assert forbidden not in raw

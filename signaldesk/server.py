@@ -559,6 +559,8 @@ def create_app(engine: Engine, scheduler: Scheduler | None = None, delivery_env:
     def project_export():
         try:
             return projects.export_responses(cfg, db)
+        except projects.ExportBlocked as e:      # fixed wording from our own checks: no file content or paths
+            raise HTTPException(409, f"Export stopped: {e}. Nothing was published; the incomplete folder is kept for inspection.") from None
         except (OSError, ValueError, KeyError, TypeError):
             raise HTTPException(400, "Export could not complete safely. Check data-home access and source review formats.") from None
 
