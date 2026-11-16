@@ -1,64 +1,43 @@
-# Project Coach handoff — 2026-11-15
-- Branch: project-coach, based on local v4-outcomes; small local commits only.
-- No merge, push, sibling clone writes, Supabase changes or APK build.
-- Step 1 implemented: config, three read-only adapters, Git metadata, SQLite
-  migration, daily selection, human responses, exports, fifth agent and desktop UI.
-- Step 1 verification: fixtures/browser pass; private copied-data run PENDING.
-- Step 2 NOT started: cloud/schema.sql unchanged; owner must run future SQL.
-- Step 3 NOT started: Mobile.tsx unchanged; no phone Projects/offline answers yet.
-- Step 4 NOT started: notifications remain unimplemented.
-- docs/PROJECT_COACH.md contains contracts, export details and four deferred designs.
-- Owner authorized focused read-only source/format inspection after the first stop.
+# Project Coach handoff — updated 2026-11-16
 
-## Verification
-- Full Python suite: 314 tests pass; deterministic evaluation: 19 cases pass.
-- Project Coach: 19 fixture tests, including blind payloads, persistence, fairness,
-  concurrency, immutable answers, export conflicts and permission-denied paths.
-- TypeScript and desktop production build pass with commands below.
-- Projects.tsx lint passes. Whole-app strict lint finds existing warnings elsewhere.
-- Real local browser on invented data: save, skip, refresh, export, reload; widths
-  390/1440/1728; 390 touch with throttled network and disabled cache all passed.
-- Better Design principles, review rules and comprehension checks completed.
-- Rendered spacing: completed; zero critical/serious findings across six states.
-- Remaining moderate spacing findings concern the existing shell and alignment.
-- Read-only adapters accepted current sibling review formats and all Git metadata.
-- No real-data end-to-end test, cloud/RLS, mobile build, APK, notification or model run.
-- Private profile/CV/contacts/jobs/database contents were never printed or committed.
+Branch `project-coach` (from local `v4-outcomes`). Nothing pushed or merged. Work uses the data copy
+`D:\LocalAI\signaldesk-v4-copy` only; the live home `D:\LocalAI\signaldesk` is untouched.
 
-## Access and runtime limitations
-- D:\LocalAI\signaldesk-v4-copy is sandbox-inaccessible. Live home never accessed.
-- Asked owner to copy it to data/project-coach-copy, excluding delivery.env and
-  rls-test.env; copy not confirmed/present at last check. Do not use live data.
-- .venv launcher points to inaccessible Python312; workspace Python 3.12.10 works.
-- Node v24.22.1: ordinary npm hits C:\ realpath denial in this sandbox.
-- Native Vite config loading plus symlink flags works; no dependencies added.
-- Browser fixtures/artifacts are ignored under data/; no private-data screenshots.
+## Part 1 — state found on 2026-11-16 (all re-run, not taken from the old handoff)
+- Both branches clean. pytest 314 passed; eval 19/19; tsc clean; oxlint 0 errors, 14 old warnings;
+  desktop and mobile builds pass. `.venv` works here (Codex's sandbox could not run it).
+- Step 1 was fixture-tested only; Steps 2–4 not started (schema, Mobile.tsx, notifications untouched).
+- Review findings fixed since: hard-coded "Why it matters" (now sourced and validated), timestamp
+  ordering across time zones, generic export errors, duplicate nav icon, raw-dump job-fit cards,
+  whole data sheet shown as evidence. Open: SignalDesk cards carry full article text and profile-fact
+  notes, so the cloud copy needs a reduced payload (Step 2).
 
-## Exact commands (PowerShell, from SignalDesk root)
-The helper uses the existing workspace runtime and SignalDesk dependencies:
-```powershell
-$py = '..\.pushback-tools\python\python.exe'
-function sdp { & $py -B -c "import runpy,sys; sys.path[:0]=['.','.venv/Lib/site-packages']; m=sys.argv.pop(1); sys.argv[0]=m; runpy.run_module(m,run_name='__main__')" @args }
-New-Item -ItemType Directory -Force '..\.project-coach-checks' | Out-Null
-$env:SSL_CERT_FILE = & $py -c "import sys;sys.path.insert(0,'.venv/Lib/site-packages');import certifi;print(certifi.where())"
-Remove-Item Env:SSL_CERT_DIR -ErrorAction SilentlyContinue
-sdp pytest -q --basetemp=../.project-coach-checks/next-run
-sdp eval.run_eval rules
-$env:NODE_OPTIONS = '--preserve-symlinks --preserve-symlinks-main'
-Push-Location web
-node node_modules/typescript/bin/tsc -b
-node node_modules/vite/bin/vite.js build --configLoader native
-Pop-Location
-# ONLY once the private COPY exists and has [[project]] entries:
-sdp signaldesk.projects collect --home data/project-coach-copy
-sdp signaldesk.projects export --home data/project-coach-copy
-$env:SIGNALDESK_SUPABASE_SERVICE_KEY = '' # prevent existing briefing sync
-sdp signaldesk --home data/project-coach-copy --no-start-model --port 8793
+## Step 1 — collector, task model, desktop page: run on real data
+- Copy config has three `[[project]]` entries (backup: `config.toml.before-projects`; DB backup:
+  `D:\LocalAI\signaldesk-v4-copy-db-before-projects.db`).
+- Real collection: 3 tasks (nextword 1, signaldesk 2) + 1 pushback laptop reminder, because all 60
+  pushback rows are labelled ("All 60 rows ... already have a human_label"; no model run).
+- Answered in the browser: job-fit (unsure) and tutor answer (minor) on the copy; label task (unclear)
+  on a scratch fixture home with 3 blanked rows (real pushback has none). Every note reads
+  "TEST ANSWER (Claude), not a real review" — they must never be written back to a clone.
+- Skip, refresh (no second allowance), missing-verdict error, export: all checked in the browser.
+- Exports: pushback CSV (sheet columns + human_at, input_origin), nextword ZIP (4 sheets, key.json,
+  audit JSON), signaldesk JSON v1. Checked by opening the files.
+- Blindness: API and rendered page scanned for grader verdict/reason/score — none. Tests cover the
+  API, stored snapshots, NextWord checks/pass/ai_review/model names.
+- "Why it matters": README line + counts, re-verified at collection; `check_why` rejects generic text
+  (tests). Rendered at 390 (light, dark) and 1440/1728 via headless Chrome; no horizontal scroll.
+  Spacing measured at 390: 0 critical/serious. 1440/1728 not re-measured after the card reorder.
+  Comprehension check: pass.
+
+## Next
+Step 2 cloud sync (needs owner to run SQL), Step 3 phone tab, Step 4 notifications, Parts 3–5.
+
+## Commands
 ```
-Open http://127.0.0.1:8793/#/projects. Keep a new basetemp for each test run.
-
-## Decisions waiting on owner
-- Provide/confirm the copied home, then verify collection without printing its data.
-- Review Step 1 before authorizing Step 2; do not proceed automatically.
-- NextWord export is one ZIP retaining consumer sheet names/key.json plus audit JSON;
-  Pushback is CSV; SignalDesk is versioned JSON. Nothing imports into sibling clones.
+.venv\Scripts\python -m pytest -q
+.venv\Scripts\python -m signaldesk.projects collect --home D:\LocalAI\signaldesk-v4-copy
+.venv\Scripts\python -m signaldesk --home D:\LocalAI\signaldesk-v4-copy --no-start-model --port 8793
+```
+Owner rules: ask before live Supabase changes, first write/push in pushback or nextword, any push to
+main, merge, scheduled task, firewall/LAN/tunnel changes. Nothing private in Git or logs.
