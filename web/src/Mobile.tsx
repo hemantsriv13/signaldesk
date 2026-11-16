@@ -3,6 +3,9 @@ import { createClient, type Session } from "@supabase/supabase-js"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { clearAccount, readQueue, type KeyValue } from "@/mobile/answer-queue"
+import { PhoneProjects } from "@/mobile/projects"
+import * as reminders from "@/mobile/reminders"
 
 interface Item { type: string; id: number; title: string; subtitle?: string; summary?: string; original_url?: string; match?: string; badges?: { text: string }[] }
 interface Brief { id: string; created_at: string; synced_at: string; payload: { generated_at: string; jobs: Item[]; articles: Item[]; case: Item | null; term: { term: string; explanation: string } | null; notes: string[]; model_id?: string } }
@@ -10,6 +13,7 @@ interface Connection { url: string; key: string }
 const safeUrl = (url?: string) => { try { const u = new URL(url ?? ""); return ["https:", "http:"].includes(u.protocol) ? u.href : null } catch { return null } }
 const read = (key: string) => { try { return localStorage.getItem(key) } catch { return null } }
 const store = (key: string, value: string | null) => { try { if (value === null) localStorage.removeItem(key); else localStorage.setItem(key, value) } catch { /* no persistent device cache */ } }
+const device: KeyValue = { get: read, set: store }
 
 export default function Mobile() {
   const [connection, setConnection] = useState<Connection | null>(() => {
@@ -46,6 +50,7 @@ function Reader({ connection, onDisconnect }: { connection: Connection; onDiscon
   const [focus, setFocus] = useState<Item | null>(null)
   const [cached, setCached] = useState(false)
   const [saved, setSaved] = useState<string[]>([])
+  const [confirmOut, setConfirmOut] = useState(0)
   useEffect(() => {
     client.auth.getSession().then(({ data, error }) => { if (error) setError(error.message); setSession(data.session); setReady(true) }).catch(() => { setError("Could not restore your session. Check the connection."); setReady(true) })
     const { data } = client.auth.onAuthStateChange((_event, s) => setSession(s))
@@ -84,23 +89,35 @@ function Reader({ connection, onDisconnect }: { connection: Connection; onDiscon
     setSaved(next); store("signaldesk-saved:" + session.user.id, JSON.stringify(next))
   }
   const visible = tab === "Jobs" ? all.filter((i) => i.type === "job") : tab === "Reading" ? all.filter((i) => i.type !== "job") : tab === "Saved" ? briefs.flatMap((b) => [...b.payload.jobs, ...b.payload.articles, ...(b.payload.case ? [b.payload.case] : [])]).filter((i, n, a) => saved.includes(i.type + ":" + i.id) && a.findIndex((x) => x.type === i.type && x.id === i.id) === n) : all
-  return <main className="mobile-shell"><header className="mobile-top"><span className="flex items-center gap-2 font-heading text-xl"><span className="brand-mark">s</span>SignalDesk</span><Button variant="ghost" onClick={async () => {
+  const signOut = async () => {
     store("signaldesk-cache:" + session.user.id, null); store("signaldesk-saved:" + session.user.id, null)
-    try { await client.auth.signOut({ scope: 'local' }) } finally { setSession(null); setBriefs([]); setSaved([]) }
-  }}>Sign out</Button></header><div className="mobile-content">
+    clearAccount(device, session.user.id)                       // cached tasks, skips and unsent answers
+    try { await reminders.stop(read, store) } catch { /* reminders may already be off */ }
+    try { await client.auth.signOut({ scope: 'local' }) } finally { setConfirmOut(0); setSession(null); setBriefs([]); setSaved([]) }
+  }
+  return <main className="mobile-shell"><header className="mobile-top"><span className="flex items-center gap-2 font-heading text-xl"><span className="brand-mark">s</span>SignalDesk</span><Button variant="ghost" onClick={() => {
+    const unsent = readQueue(device, session.user.id).length
+    if (unsent) setConfirmOut(unsent); else void signOut()
+  }}>Sign out</Button></header>
+  {confirmOut > 0 && <div role="alertdialog" aria-labelledby="out-title" className="mobile-paper mb-4 grid gap-3">
+    <h2 id="out-title" className="font-heading text-xl">{confirmOut === 1 ? "1 answer is not sent" : `${confirmOut} answers are not sent`}</h2>
+    <p className="text-sm">Signing out deletes {confirmOut === 1 ? "it" : "them"} from this phone.</p>
+    <div className="flex flex-wrap gap-2"><Button variant="outline" onClick={() => setConfirmOut(0)}>Stay signed in</Button><Button variant="destructive" onClick={() => void signOut()}>Sign out and delete</Button></div>
+  </div>}
+  <div className="mobile-content">
     <section className="welcome-card rounded-2xl px-5 py-4"><h1 className="font-heading text-xl">Make room for good ideas.</h1></section>
-    <div className="my-4 flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground"><span>{cached ? "Saved device copies" : "Cloud copies"}{current ? ` · synced ${new Date(current.synced_at).toLocaleString()}` : ""}</span><Button variant="outline" disabled={busy} onClick={() => load(session)}>{busy ? "Refreshing…" : "Refresh"}</Button></div>
-    {error && <p role="status" className="mb-3 text-sm">{error}</p>}
+    {tab !== "Projects" && <div className="my-4 flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground"><span>{cached ? "Saved device copies" : "Cloud copies"}{current ? ` · synced ${new Date(current.synced_at).toLocaleString()}` : ""}</span><Button variant="outline" disabled={busy} onClick={() => load(session)}>{busy ? "Refreshing…" : "Refresh"}</Button></div>}
+    {tab !== "Projects" && error && <p role="status" className="mb-3 text-sm">{error}</p>}
     {digest && !current && <div className="mobile-paper"><p>This briefing is not available in the latest 50 synced copies. It may have been archived or you may be signed in to another account.</p><Button onClick={() => setDigest(null)}>Show latest briefing</Button></div>}
-    {tab !== "Summaries" && briefs.length > 0 && <label className="mb-4 grid gap-2 text-sm">Choose a briefing<select className="rounded-lg border bg-card p-3" value={current?.id ?? ""} onChange={(e) => { setDigest(e.target.value); setFocus(null) }}>{briefs.map((b) => <option key={b.id} value={b.id}>{new Date(b.created_at).toLocaleString()}</option>)}</select></label>}
-    {tab === "Summaries" ? <SummaryList briefs={briefs} onOpen={(id) => { setDigest(id); setTab("Today"); setFocus(null) }} /> : focus ? <article className="mobile-paper"><Button variant="ghost" onClick={() => setFocus(null)}>← Back to briefing</Button><p className="mt-4 text-xs uppercase tracking-widest text-primary">{focus.type === "job" ? "Opportunity" : focus.type === "case" ? "AI in practice" : "A useful read"}</p><h2 className="my-3 font-heading text-3xl">{focus.title}</h2><p className="text-sm text-muted-foreground">{focus.subtitle}</p><p className="my-5 whitespace-pre-wrap leading-relaxed">{focus.summary || "No AI summary was available when this briefing was created. Open the original source."}</p>{focus.match && <p className="text-sm">CV assessment: {focus.match}. Advisory; check the requirements yourself.</p>}{focus.badges?.map((b) => <p key={b.text} className="my-2 text-sm text-muted-foreground">{b.text}</p>)}<p className="my-4 text-xs text-muted-foreground">This is a saved snapshot, not a live check of the listing. AI summaries may contain mistakes.</p><div className="flex flex-wrap gap-3">{safeUrl(focus.original_url) && <a className="rounded-lg bg-primary px-4 py-3 text-sm font-medium text-primary-foreground" href={safeUrl(focus.original_url)!} target="_blank" rel="noreferrer">Open original source ↗</a>}<Button variant="outline" onClick={() => bookmark(focus)}>{saved.includes(focus.type + ":" + focus.id) ? "Remove from saved" : "Save on this device"}</Button></div></article> : <>
+    {tab !== "Summaries" && tab !== "Projects" && briefs.length > 0 && <label className="mb-4 grid gap-2 text-sm">Choose a briefing<select className="rounded-lg border bg-card p-3" value={current?.id ?? ""} onChange={(e) => { setDigest(e.target.value); setFocus(null) }}>{briefs.map((b) => <option key={b.id} value={b.id}>{new Date(b.created_at).toLocaleString()}</option>)}</select></label>}
+    {tab === "Projects" ? <PhoneProjects client={client} session={session} /> : tab === "Summaries" ? <SummaryList briefs={briefs} onOpen={(id) => { setDigest(id); setTab("Today"); setFocus(null) }} /> : focus ? <article className="mobile-paper"><Button variant="ghost" onClick={() => setFocus(null)}>← Back to briefing</Button><p className="mt-4 text-xs uppercase tracking-widest text-primary">{focus.type === "job" ? "Opportunity" : focus.type === "case" ? "AI in practice" : "A useful read"}</p><h2 className="my-3 font-heading text-3xl">{focus.title}</h2><p className="text-sm text-muted-foreground">{focus.subtitle}</p><p className="my-5 whitespace-pre-wrap leading-relaxed">{focus.summary || "No AI summary was available when this briefing was created. Open the original source."}</p>{focus.match && <p className="text-sm">CV assessment: {focus.match}. Advisory; check the requirements yourself.</p>}{focus.badges?.map((b) => <p key={b.text} className="my-2 text-sm text-muted-foreground">{b.text}</p>)}<p className="my-4 text-xs text-muted-foreground">This is a saved snapshot, not a live check of the listing. AI summaries may contain mistakes.</p><div className="flex flex-wrap gap-3">{safeUrl(focus.original_url) && <a className="rounded-lg bg-primary px-4 py-3 text-sm font-medium text-primary-foreground" href={safeUrl(focus.original_url)!} target="_blank" rel="noreferrer">Open original source ↗</a>}<Button variant="outline" onClick={() => bookmark(focus)}>{saved.includes(focus.type + ":" + focus.id) ? "Remove from saved" : "Save on this device"}</Button></div></article> : <>
       <div className="grid gap-4 sm:grid-cols-2">{visible.map((item) => <button key={item.type + ":" + item.id} className="mobile-item text-left" onClick={() => setFocus(item)}><span className="text-xs font-semibold uppercase tracking-widest text-primary">{item.type === "job" ? "Opportunity" : item.type === "case" ? "AI in practice" : "Reading"}</span><h2 className="my-3 font-heading text-2xl leading-tight">{item.title}</h2><p className="text-xs text-muted-foreground">{item.subtitle}</p><p className="mt-3 line-clamp-3 text-sm leading-relaxed">{item.summary || "Open this find to explore the original source."}</p><span className="mt-4 block text-sm font-medium text-primary">Take a closer look →</span></button>)}</div>
       {!visible.length && <section className="mobile-paper"><h2 className="font-heading text-2xl">A little breathing room.</h2><p className="mt-2 text-sm">{briefs.length ? "No items in this view yet. Try another tab or briefing." : "No briefings synced yet. Start the desktop agents and configure cloud sync to bring your first finds here."}</p></section>}
       {tab === "Today" && current?.payload.term && <aside className="my-5 rounded-2xl bg-[#fae4c7] p-5 text-[#5a3b22]"><p className="text-xs uppercase tracking-widest">One idea to keep</p><h2 className="my-2 font-heading text-2xl">{current.payload.term.term}</h2><p className="text-sm leading-relaxed">{current.payload.term.explanation}</p></aside>}
       {current?.payload.notes.map((n) => <p key={n} className="my-3 text-xs text-muted-foreground">{n}</p>)}
     </>}
     <p className="my-6 text-xs text-muted-foreground">Your laptop makes new briefings.</p>
-  </div><nav className="mobile-nav" aria-label="Reader sections">{["Today", "Summaries", "Jobs", "Reading", "Saved"].map((name) => <button key={name} aria-current={tab === name ? "page" : undefined} onClick={() => { setTab(name); setFocus(null) }} className={tab === name ? "active" : ""}>{name}</button>)}</nav></main>
+  </div><nav className="mobile-nav" aria-label="Reader sections">{["Today", "Projects", "Jobs", "Reading", "Saved", "Summaries"].map((name) => <button key={name} aria-current={tab === name ? "page" : undefined} onClick={() => { setTab(name); setFocus(null) }} className={tab === name ? "active" : ""}>{name}</button>)}</nav></main>
 }
 
 function SummaryList({ briefs, onOpen }: { briefs: Brief[]; onOpen: (id: string) => void }) {

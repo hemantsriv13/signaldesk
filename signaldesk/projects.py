@@ -100,7 +100,13 @@ def _phone_variant(kind: str, output: dict, target: dict, text: str | None) -> d
 def phone_card(payload: dict) -> dict:
     """The phone-safe card for one stored task payload."""
     card = {k: payload.get(k) for k in PHONE_FIELDS}
-    card.update(payload.get("phone") or {})
+    if payload.get("phone"):
+        card.update(payload["phone"])
+    elif payload.get("type") == "judge_analysis":
+        # Prepared before phone variants existed: never fall back to the laptop's full evidence.
+        card["text"] = re.sub(r"\nEvidence claimed from your profile:\n(?:•[^\n]*\n?)*",
+                              "\nEvidence claimed from your profile: shown on your laptop only.\n\n", card.get("text") or "")
+        card["evidence"] = "The source for this card is on your laptop."
     card["evidence"] = (card.get("evidence") or "")[:20000]
     return card
 

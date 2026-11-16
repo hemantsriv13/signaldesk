@@ -140,3 +140,13 @@ def test_auto_prepare_is_off_by_default_and_prepares_once_when_on(tmp_path, monk
     run(cfg, db, cloud)
     run(cfg, db, cloud)
     assert db.scalar("SELECT COUNT(*) FROM project_days") == 1 and len(cloud.tasks) == 3
+
+
+def test_cards_prepared_before_phone_variants_never_send_laptop_evidence():
+    old = {"type": "judge_analysis", "title": "Review: Role", "verdicts": ["agree"],
+           "text": "Match: weak\n\nEvidence claimed from your profile:\n• R: PROFILE_NOTE (facts P1)\n• S: OTHER_NOTE (facts P2)\n\nGaps:\n• none",
+           "evidence": "Source text:\nFULL POSTING\n\nRecorded inputs:\nPROFILE_VERSION"}
+    card = projects.phone_card(old)
+    raw = json.dumps(card)
+    assert "PROFILE_NOTE" not in raw and "OTHER_NOTE" not in raw and "FULL POSTING" not in raw and "PROFILE_VERSION" not in raw
+    assert "Gaps:" in card["text"] and "laptop" in card["evidence"]
