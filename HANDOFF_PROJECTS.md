@@ -80,3 +80,16 @@ main, merge, scheduled task, firewall/LAN/tunnel changes. Nothing private in Git
 3. pushback has untracked HANDOFF.md and reports/runs/ — write-back refuses until handled.
 4. [coach] auto_prepare on? 5. Delete the TEST answers on the copy and fixture homes?
 6. Go-ahead to run LAN/Tailscale mode after your setup steps. 7. Go-ahead to migrate the live folder.
+
+## Update 2026-11-17
+- Supabase SQL run by owner; verify_cloud.py --projects on the live project: 32/32 pass.
+- Owner decisions applied: auto_prepare on by default (own loop step, works without cloud; checked
+  on the copy and live); TEST answers, their export and scratch fixtures deleted; pushback write-back
+  unchanged (only unpinned sheets); NextWord answers go to evals/local_ai/human_review_filled
+  (dry run with its real checks: 145 tests + compare_review passed, 5 new files, kit unchanged).
+- Live folder migrated with owner approval: config.toml created (3 projects; writeback off), schema
+  2 -> 7, rows/statuses kept, integrity ok. Started once: Pipeline and Projects respond; today's batch
+  prepared by itself. Backup: D:\LocalAI\signaldesk-backup-before-project-coach-20261116.
+- Phone sync of tasks runs only when started with scripts\start-v2.ps1 (it loads delivery.env).
+- Waiting on owner: Tailscale setup (docs/LAN_AND_PANEL.md §8), real-phone tests, and adding
+  "nextword" to [writeback] write/push in D:\LocalAI\signaldesk\config.toml when ready.
