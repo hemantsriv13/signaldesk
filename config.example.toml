@@ -4,6 +4,8 @@
 
 # Optional Project Coach: read-only local clones. Missing paths are reported, not fatal.
 # Relative paths resolve against the data home, not the shell's working directory.
+# [coach]
+# auto_prepare = true   # default: prepare each day's batch while SignalDesk runs (no model; reads clones only)
 # [[project]]
 # name = "pushback"
 # path = 'C:\Users\Hemant\Documents\GitHub\pushback'

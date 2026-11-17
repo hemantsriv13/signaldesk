@@ -32,7 +32,8 @@ SignalDesk JSON v1, under `<home>\project-exports\<time>-<id>`. A failed check n
 delete or import columns). The laptop pushes phone-safe cards: SignalDesk cards never carry
 profile-fact notes, recorded inputs or full articles (postings capped at 4,000 characters). Phone
 answers are imported through the same rules; conflicts keep the earlier answer and are shown.
-`[coach] auto_prepare = true` prepares each day's batch while SignalDesk runs (off by default).
+While SignalDesk runs it prepares each new day's batch by itself (`[coach] auto_prepare`, on by
+default; set it to false to prepare only from Projects or the CLI). This works with or without cloud sync.
 
 The Android app's Projects tab queues answers on the phone with a phone-made id, sends them when
 online, recognises a lost reply instead of duplicating, and clears cards, queue, skips, live pairing

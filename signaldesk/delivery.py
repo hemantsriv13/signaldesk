@@ -143,8 +143,23 @@ class Delivery:
         except Exception:
             self.db.set_setting('writeback_last_run', now_iso())
 
+    def prepare_tick(self):
+        """[coach] auto_prepare (on by default): prepare today's Project Coach batch once a day while the
+        app runs, before syncing, so the phone gets it too. Reads the clones only; never a model."""
+        from . import projects
+        cfg = self.engine.cfg
+        if not (cfg.project and cfg.coach.auto_prepare) or cfg.demo:
+            return
+        try:
+            projects.prepare(cfg, self.db)
+        except Exception:
+            # Same rule as sync: no exception text, it can contain source text or private paths.
+            self.db.set_setting('coach_prepare_status', {'at': now_iso(), 'state': 'failed',
+                                'message': 'Preparing today\'s project batch failed; it is retried in a minute. Use Projects to see why.'})
+
     def _loop(self):
         while not self.stop.is_set():
+            self.prepare_tick()
             self.tick()
             self.writeback_tick()
             self.stop.wait(60)

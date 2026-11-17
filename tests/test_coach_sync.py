@@ -131,15 +131,31 @@ def test_missing_cloud_tables_do_not_break_briefing_sync(engine, monkeypatch):
     assert status["state"] == "failed" and "project_coach.sql" in status["message"] and "fixture" not in status["message"]
 
 
-def test_auto_prepare_is_off_by_default_and_prepares_once_when_on(tmp_path, monkeypatch):
+def test_sync_alone_never_prepares_a_batch(tmp_path, monkeypatch):
     cfg, db = setup(tmp_path, monkeypatch)
     cloud = FakeCloud()
     run(cfg, db, cloud)
     assert not db.scalar("SELECT COUNT(*) FROM project_days") and not cloud.tasks
-    cfg.coach.auto_prepare = True
-    run(cfg, db, cloud)
-    run(cfg, db, cloud)
-    assert db.scalar("SELECT COUNT(*) FROM project_days") == 1 and len(cloud.tasks) == 3
+
+
+def test_auto_prepare_is_on_by_default_works_without_cloud_and_prepares_once(engine, monkeypatch):
+    cfg, _ = setup(engine.cfg.home, monkeypatch)
+    engine.cfg.project = cfg.project
+    assert engine.cfg.coach.auto_prepare is True
+    d = Delivery(engine, env={})                      # no cloud settings at all
+    d.prepare_tick(); d.prepare_tick()
+    assert engine.db.scalar("SELECT COUNT(*) FROM project_days") == 1
+    assert engine.db.scalar("SELECT COUNT(*) FROM project_tasks WHERE kind != 'laptop_reminder'") == 3
+    cloud = FakeCloud()
+    coach_sync.sync(engine.cfg, engine.db, client(cloud), BASE, {"apikey": "fixture"}, OWNER)
+    assert len(cloud.tasks) == 3
+
+
+def test_auto_prepare_can_be_switched_off(engine, monkeypatch):
+    cfg, _ = setup(engine.cfg.home, monkeypatch)
+    engine.cfg.project, engine.cfg.coach.auto_prepare = cfg.project, False
+    Delivery(engine, env={}).prepare_tick()
+    assert not engine.db.scalar("SELECT COUNT(*) FROM project_days")
 
 
 def test_cards_prepared_before_phone_variants_never_send_laptop_evidence():

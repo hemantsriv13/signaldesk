@@ -100,9 +100,10 @@ class ExperimentalConfig:
 
 @dataclass
 class CoachConfig:
-    """Project Coach. auto_prepare: while SignalDesk runs, prepare each day's batch (reading the
-    configured clones only) and sync it, so the phone has tasks when the laptop is later off."""
-    auto_prepare: bool = False
+    """Project Coach. auto_prepare: while SignalDesk runs, prepare each new day's batch (reading the
+    configured clones only; no model), so the page and the phone have tasks without a click.
+    Works with or without cloud sync. Set false to prepare only from the Projects page or CLI."""
+    auto_prepare: bool = True
 
 
 @dataclass

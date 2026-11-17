@@ -80,10 +80,8 @@ def push(db: DB, client, base: str, headers: dict, owner: str, today: date) -> i
 
 
 def sync(cfg, db: DB, client, base: str, headers: dict, owner: str, now: datetime | None = None) -> dict:
-    """One round: optional daily preparation, pull answers, then push task state."""
+    """One round: pull phone answers, then push task state. Daily preparation is Delivery.prepare_tick."""
     now = now or datetime.now().astimezone()
-    if cfg.project and cfg.coach.auto_prepare:
-        projects.prepare(cfg, db, now)
     pulled = pull(db, client, base, headers, owner)
     pushed = push(db, client, base, headers, owner, now.date())
     return {"pulled": pulled, "pushed": pushed}
