@@ -355,6 +355,11 @@ def nextword(name, root, db=None):
     for sheet in sorted((base / "human_review").glob("*.md")):
         # The existing blank verdict marker is the project's awaiting-human-review state.
         marks = _sheet_marks(sheet.read_text(encoding="utf-8-sig"))
+        filled = base / "human_review_filled" / sheet.name          # answers written back by SignalDesk or by hand
+        if filled.is_file():
+            for aid, m in _sheet_marks(filled.read_text(encoding="utf-8-sig")).items():
+                if aid in marks and m["verdict"]:
+                    marks[aid]["verdict"] = m["verdict"]
         blank = sum(not m["verdict"] for m in marks.values())
         opened = count_fact(blank, f"{blank} of {len(marks)} answers in {sheet.name} still have a blank verdict", f"nextword {sheet.name}")
         facts = [f for f in (readme.get("problem"), opened, role) if f]

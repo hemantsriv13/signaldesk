@@ -55,13 +55,17 @@ number than batch work (the queue already takes the lowest number first).
 pushed only when also in `[writeback] push`. Work happens in a git worktree under
 `<home>\project-worktrees\<repo>` on branch `phone-review` (your open clone is not switched or
 edited). Allow-list: pushback `labels/*.csv` (human_label, human_note); NextWord
-`evals/local_ai/human_review/*.md` (Verdict, Note). SignalDesk answers are never committed.
+`evals/local_ai/human_review_filled/` (Verdict, Note; the first write copies the blank kit there).
+The blind kit in `evals/local_ai/human_review/` is never changed. Read your answers with
+`python evals/local_ai/compare_review.py --sheets evals/local_ai/human_review_filled`.
+SignalDesk answers are never committed.
 It stops on uncommitted work in the clone, a non-fast-forward `phone-review`, format drift, any
 change outside the allow-list, or a failing repo check (pushback: tests and `labels score`;
-NextWord: unittest and `compare_review.py`). Commits use your git identity and say they came from
+NextWord: unittest and `compare_review.py --sheets` on the filled copy). Commits use your git identity and say they came from
 SignalDesk review. Main is never committed or pushed.
 
-**Found in the dry run on scratch copies (2026-11-16):** both repos' own tests reject filled answers
-in their current committed sheets. Pushback pins the label CSV hashes in
-`reports/run-provenance.json`; NextWord requires the committed sheets to stay blank. So with the
-repos as they are, write-back always stops before committing. This needs your decision (see HANDOFF_PROJECTS.md).
+**Owner decisions (2026-11-17):** pushback stays as it is. Its finished sheets are pinned by
+`reports/run-provenance.json`, so only new, unpinned sheets (from `pushback labels make`) are written.
+NextWord answers go to the filled copy, so its tests that require a blank kit keep passing.
+Dry run on a scratch copy of NextWord with its real checks: 145 tests and `compare_review` passed,
+one commit of 5 new files on `phone-review`, kit unchanged, pushed to a scratch remote.

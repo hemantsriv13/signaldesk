@@ -82,7 +82,7 @@ def test_approved_write_changes_only_human_cells_on_phone_review_and_does_not_pu
     assert git(wt, "rev-parse", "--abbrev-ref", "HEAD") == "phone-review"
     assert git(wt, "show", "--name-only", "--format=", "HEAD") == "labels/sheet.csv"
     msg = git(wt, "log", "-1", "--format=%an <%ae>%n%B")
-    assert msg.startswith("Owner Fixture <owner@example.invalid>") and "from SignalDesk review" in msg
+    assert msg.startswith("Owner Fixture <owner@example.invalid>") and "from SignalDesk review" in msg and "verdict and note fields" in msg
     after = (wt / "labels" / "sheet.csv").read_bytes()
     assert after.startswith(b"\xef\xbb\xbf") and b"\r\n" in after
     old = list(csv.reader(io.StringIO(before.decode("utf-8-sig"), newline="")))
@@ -156,17 +156,47 @@ def test_nextword_verdict_and_note_lines_only(tmp_path, monkeypatch):
     cfg.writeback.write = ["nextword"]
     [r] = writeback.run(cfg, db)
     assert r["written"] == 1, (r["status"], r["message"])
-    after = (cfg.home / "project-worktrees/nextword/evals/local_ai/human_review/fixture.md").read_bytes()
+    wt = cfg.home / "project-worktrees/nextword"
+    # The blind kit stays blank and unchanged; the answer goes into the filled copy.
+    assert (wt / "evals/local_ai/human_review/fixture.md").read_bytes() == before
+    assert sorted(git(wt, "show", "--name-only", "--format=", "HEAD").splitlines()) == [
+        "evals/local_ai/human_review_filled/fixture.md", "evals/local_ai/human_review_filled/key.json"]
+    after = (wt / "evals/local_ai/human_review_filled/fixture.md").read_bytes()
     changed = [(a, b) for a, b in zip(before.split(b"\r\n"), after.split(b"\r\n")) if a != b]
     assert changed == [(b"Verdict: ", b"Verdict: wrong"), (b"Note: ", b"Note: Checked, line one line two")]
     assert after.count(b"\r\n") == before.count(b"\r\n")
+    assert (wt / "evals/local_ai/human_review_filled/key.json").read_bytes() == (wt / "evals/local_ai/human_review/key.json").read_bytes()
+
+
+def test_nextword_filled_answers_count_as_answered_and_kit_drift_stops(tmp_path, monkeypatch):
+    cfg, db, clone, remote = setup(tmp_path, monkeypatch, "nextword")
+    answer_all(cfg, db, ["wrong"])
+    cfg.writeback.write = ["nextword"]
+    assert writeback.run(cfg, db)[0]["written"] == 1
+    # The collector reads the filled copy too: that answer is no longer open (2 of 3 left).
+    wt = cfg.home / "project-worktrees/nextword"
+    tasks = projects.nextword("nextword", wt, db)
+    assert len(tasks) == 2 and "2 of 3 answers in fixture.md still have a blank verdict" in tasks[0]["why_it_matters"]
+    # If the kit is regenerated (new key.json) after answers were filled, writing stops.
+    tasks2 = projects.prepare(cfg, db, NOW.replace(day=17))["tasks"]
+    projects.respond(db, tasks2[0]["id"], "minor", "")
+    kit_key = clone / "evals/local_ai/human_review/key.json"
+    kit_key.write_text(kit_key.read_text(encoding="utf-8").replace("fixture-model", "regenerated"), encoding="utf-8")
+    git(clone, "commit", "-qam", "regenerate kit"); git(clone, "push", "-q", "origin", "main")
+    git(wt, "fetch", "-q", "origin"); git(wt, "merge", "-q", "--no-edit", "origin/main")
+    [r] = writeback.run(cfg, db)
+    assert r["status"] == "stopped" and "regenerated" in r["message"]
 
 
 def test_allow_list_rejects_code_probes_and_run_files():
     assert writeback.outside_allow_list("pushback", ["labels/sheet.csv"]) == []
     for bad in ("pushback/cli.py", "probes/x.yaml", "runs/r.json", "reports/grader-agreement.md", "labels/../cli.py", "README.md"):
         assert writeback.outside_allow_list("pushback", [bad]) == [bad]
-    assert writeback.outside_allow_list("nextword", ["evals/local_ai/human_review/key.json", "evals/local_ai/results/x.json"]) != []
+    for bad in ("evals/local_ai/human_review/fixture.md", "evals/local_ai/human_review/key.json",
+                "evals/local_ai/human_review_filled/sub/x.md", "evals/local_ai/human_review_filled/../run_eval.py",
+                "evals/local_ai/results/x.json"):
+        assert writeback.outside_allow_list("nextword", [bad]) == [bad]
+    assert writeback.outside_allow_list("nextword", ["evals/local_ai/human_review_filled/x.md", "evals/local_ai/human_review_filled/key.json"]) == []
 
 
 def test_signaldesk_answers_are_never_committed(tmp_path, monkeypatch):

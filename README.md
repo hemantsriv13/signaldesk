@@ -90,10 +90,10 @@ commands that would verify the rest: [docs/STATUS.md](docs/STATUS.md).
 | V4 | Demo mode (`--demo`) | Verified offline | `tests/test_demo.py`: no network or model requests |
 | PC | Project Coach: daily batch, sourced reasons, desktop Projects page, exports | Verified on a copy | Ran on the data copy against the real clones 2026-11-16; one answer of each type in the browser (label type on a scratch copy, real pushback has none open); exports opened; 390/1440/1728, light and dark |
 | PC | Grader verdicts hidden from label tasks | Verified | Tests on API and stored tasks, plus a scan of the live API response and rendered page |
-| PC | Cloud copy of tasks and phone answers | Built, mocked | Mocked tests only; `cloud/project_coach.sql` not yet run on the live project, so row-level security is unchecked |
+| PC | Cloud copy of tasks and phone answers | Verified (RLS) | `verify_cloud.py --projects` on the live project with two accounts, 2026-11-17: 32/32 checks. Laptop-to-cloud sync itself: mocked tests |
 | PC | Phone Projects tab, offline queue, sign-out clearing | Built, scripted | 14 scripted checks in headless Chrome at 390 px against a local Supabase stand-in; APK built; not yet on a real phone |
 | PC | Daily phone reminders | Built | APK builds with the plugin; not tested on a phone |
-| PC | Write answers into project clones (phone-review) | Built, blocked | Git tests on throwaway repos; dry run with the real repo checks: both repos' own tests reject filled answers in their current sheets, so it stops before committing |
+| PC | Write answers into project clones (phone-review) | Built, dry run | Git tests on throwaway repos; NextWord dry run on a scratch copy with its real checks (145 tests, compare_review) committed and pushed to a scratch remote. Pushback: only new, unpinned sheets are written. No real clone written yet |
 | PC | Live phone access over Tailscale | Built, mocked | Mocked tests (tailnet-only bind, token scope, CORS, revocation); no tunnel or phone run yet |
 
 Tests: 343 mocked tests and 13 phone-app tests pass, and the deterministic evaluation passes all 19 cases. CI runs both, and

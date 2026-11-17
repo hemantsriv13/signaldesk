@@ -6,7 +6,10 @@ Safety rules (each is enforced here and tested):
 - Work happens in a separate git worktree under the data home, so your open clone's checked-out
   branch and files are never changed.
 - Only allow-listed review files change, and only the human columns in them: pushback
-  labels/*.csv (human_label, human_note); nextword evals/local_ai/human_review/*.md (Verdict, Note).
+  labels/*.csv (human_label, human_note). For nextword the blind kit in evals/local_ai/human_review
+  stays blank (its own tests require that): answers go into a filled copy of the kit in
+  evals/local_ai/human_review_filled (Verdict and Note lines only), which compare_review.py reads
+  with --sheets evals/local_ai/human_review_filled.
   Anything else changed means stop and discard.
 - Stop, changing nothing, if the clone has uncommitted work, the branch cannot fast-forward from
   GitHub, a sheet would not round-trip byte for byte, or the repo's own checks fail.
@@ -33,7 +36,9 @@ from .db import DB, now_iso
 
 BRANCH = "phone-review"
 FORBIDDEN_BRANCHES = {"main", "master"}
-ALLOW = {"pushback": ["labels/*.csv"], "nextword": ["evals/local_ai/human_review/*.md"]}
+ALLOW = {"pushback": ["labels/*.csv"],
+         "nextword": ["evals/local_ai/human_review_filled/*.md", "evals/local_ai/human_review_filled/key.json"]}
+KIT, FILLED = "evals/local_ai/human_review", "evals/local_ai/human_review_filled"
 HUMAN_COLUMNS = ("human_label", "human_note")
 ANSWER_RE = re.compile(r"^<!-- answer: (\S+) -->[ \t\r]*$", re.M)   # any CRs: autocrlf can double them
 AUTO_EVERY_SECONDS = 30 * 60
@@ -118,9 +123,31 @@ def apply_pushback(root: Path, answers: list[dict]) -> tuple[dict, list[str]]:
     return results, [f"labels/{p.name}" for p in changed]
 
 
+def _filled_copy(root: Path) -> list[str]:
+    """Make or check the filled copy of NextWord's blind kit. Returns the files it created."""
+    kit, filled = root / KIT, root / FILLED
+    if not (kit / "key.json").is_file():
+        raise Stop("the NextWord review kit has no key.json")
+    created = []
+    filled.mkdir(exist_ok=True)
+    if (filled / "key.json").is_file():
+        if (filled / "key.json").read_bytes() != (kit / "key.json").read_bytes():
+            raise Stop("the review kit was regenerated since answers were first filled; "
+                       "move human_review_filled aside on the laptop before writing more")
+    else:
+        (filled / "key.json").write_bytes((kit / "key.json").read_bytes())
+        created.append(f"{FILLED}/key.json")
+    for sheet in sorted(kit.glob("*.md")):
+        if not (filled / sheet.name).exists():
+            (filled / sheet.name).write_bytes(sheet.read_bytes())
+            created.append(f"{FILLED}/{sheet.name}")
+    return created
+
+
 def apply_nextword(root: Path, answers: list[dict]) -> tuple[dict, list[str]]:
-    base = root / "evals" / "local_ai" / "human_review"
-    results, changed = {}, []
+    created = _filled_copy(root)
+    base = root / FILLED
+    results, changed = {}, list(created)
     by_sheet: dict[str, list[dict]] = {}
     for a in answers:
         by_sheet.setdefault(json.loads(a["export_json"])["sheet"], []).append(a)
@@ -163,7 +190,8 @@ def apply_nextword(root: Path, answers: list[dict]) -> tuple[dict, list[str]]:
             for (start, end), block in sorted(edits.items(), reverse=True):
                 out = out[:start] + block + out[end:]
             path.write_bytes((b"\xef\xbb\xbf" if bom else b"") + out.encode("utf-8"))
-            changed.append(f"evals/local_ai/human_review/{name}")
+            if f"{FILLED}/{name}" not in changed:
+                changed.append(f"{FILLED}/{name}")
     return results, changed
 
 
@@ -185,7 +213,14 @@ def changed_paths(wt: Path) -> list[str]:
 
 
 def outside_allow_list(kind: str, paths: list[str]) -> list[str]:
-    return [p for p in paths if not any(fnmatch.fnmatch(p.replace("\\", "/"), g) for g in ALLOW.get(kind, []))]
+    """Paths not allowed. A pattern's folder must match exactly (no sub-folders, no '..')."""
+    def ok(path: str) -> bool:
+        path = path.replace("\\", "/")
+        if ".." in path.split("/"):
+            return False
+        folder, _, name = path.rpartition("/")
+        return any(folder == g.rpartition("/")[0] and fnmatch.fnmatch(name, g.rpartition("/")[2]) for g in ALLOW.get(kind, []))
+    return [p for p in paths if not ok(p)]
 
 
 # ---------------------------------------------------------------- the repo's own checks
@@ -199,7 +234,7 @@ def checks(kind: str, wt: Path, python: str, files: list[str]) -> list[tuple[str
                 "labels", "score", "--sheet", f, "--out", str(report)]))
         return out
     return [("nextword tests", [python, "-m", "unittest"]),
-            ("nextword compare_review", [python, "evals/local_ai/compare_review.py"])]
+            ("nextword compare_review", [python, "evals/local_ai/compare_review.py", "--sheets", FILLED])]
 
 
 def run_checks(kind: str, wt: Path, python: str, files: list[str]) -> list[str]:
@@ -294,9 +329,13 @@ def write_project(cfg: Config, db: DB, p: ProjectConfig, now: datetime | None = 
                 raise Stop("a check changed a file outside the allow-list: " + ", ".join(bad))
             phone = sum(a.get("via") == "phone" for a in written)
             _git(wt, "add", "--", *files)
-            message = (f"Add {len(written)} human review answers from SignalDesk review\n\n"
+            new_files = [f for f in files if f not in _git(wt, "ls-files", "--", *files).splitlines()]
+            filled = [f for f in files if f not in new_files or f.endswith(".md")]
+            message = (f"Add {len(written)} human review answer{'s' if len(written) != 1 else ''} from SignalDesk review\n\n"
                        f"Written by SignalDesk review write-back on {now.date().isoformat()}: {phone} answered on the phone, "
-                       f"{len(written) - phone} on the laptop.\nOnly human columns changed in: {', '.join(files)}.\n"
+                       f"{len(written) - phone} on the laptop.\n"
+                       + (f"First write: copied the blank review kit into {FILLED} (the kit itself is unchanged).\n" if new_files and p.kind == "nextword" else "")
+                       + f"Only verdict and note fields were filled in: {', '.join(x for x in filled if not x.endswith('key.json'))}.\n"
                        f"Checks passed before this commit: {', '.join(entry['checks'])}.")
             _git(wt, "commit", "-q", "-m", message)
             sha = _git(wt, "rev-parse", "HEAD")
@@ -323,7 +362,7 @@ def write_project(cfg: Config, db: DB, p: ProjectConfig, now: datetime | None = 
     except Stop as e:
         if wt and wt.exists():
             _git(wt, "reset", "-q", "--hard", "HEAD", check=False)       # discard partial edits in OUR worktree only
-            _git(wt, "clean", "-q", "-fd", "--", *ALLOW[p.kind], check=False)
+            _git(wt, "clean", "-q", "-fd", "--", *{g.rpartition("/")[0] for g in ALLOW[p.kind]}, check=False)
         return {**entry, "status": "stopped", "message": f"Stopped: {e}. Nothing was committed."}
     except (OSError, subprocess.SubprocessError, ValueError, KeyError) as e:
         if wt and wt.exists():
