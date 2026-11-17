@@ -94,7 +94,7 @@ commands that would verify the rest: [docs/STATUS.md](docs/STATUS.md).
 | PC | Phone Projects tab, offline queue, sign-out clearing | Built, scripted | 14 scripted checks in headless Chrome at 390 px against a local Supabase stand-in; APK built; not yet on a real phone |
 | PC | Daily phone reminders | Built | APK builds with the plugin; not tested on a phone |
 | PC | Write answers into project clones (phone-review) | Built, dry run | Git tests on throwaway repos; NextWord dry run on a scratch copy with its real checks (145 tests, compare_review) committed and pushed to a scratch remote. Pushback: only new, unpinned sheets are written. No real clone written yet |
-| PC | Live phone access over Tailscale | Built, mocked | Mocked tests (tailnet-only bind, token scope, CORS, revocation); no tunnel or phone run yet |
+| PC | Live phone access over Tailscale | Run on the laptop | 2026-11-17 on the live folder: tailnet-only listener, trusted certificate, 11 exposure probes and the phone route checked over the tunnel; not yet from the phone |
 
 Tests: 343 mocked tests and 13 phone-app tests pass, and the deterministic evaluation passes all 19 cases. CI runs both, and
 the web checks, on every push.

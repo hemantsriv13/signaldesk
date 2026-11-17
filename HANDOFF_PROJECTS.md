@@ -93,3 +93,8 @@ main, merge, scheduled task, firewall/LAN/tunnel changes. Nothing private in Git
 - Phone sync of tasks runs only when started with scripts\start-v2.ps1 (it loads delivery.env).
 - Waiting on owner: Tailscale setup (docs/LAN_AND_PANEL.md §8), real-phone tests, and adding
   "nextword" to [writeback] write/push in D:\LocalAI\signaldesk\config.toml when ready.
+- 2026-11-17 Tailscale live mode RUN on the live folder: listeners only 127.0.0.1:8780 and
+  100.x:8443; trusted ts.net certificate; 11 probes from the laptop over the tailnet name all as
+  intended (sign-in required, foreign origin/raw IP/plain HTTP refused, 8780 and 8000 unreachable on
+  the tailnet address, HSTS); phone route returned phone-safe cards with a throwaway code that was
+  then revoked. Waiting: owner pairs the Pixel 7 and runs the real-phone checklist.
